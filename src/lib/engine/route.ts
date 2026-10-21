@@ -83,7 +83,7 @@ function placeRouteKey(p: { tokens: string; level: string }): string {
   return `place:${p.tokens}:${p.level || "any"}`;
 }
 
-function matchPlace(raw: string, places: RawPlace[]): RawPlace | null {
+export function matchPlace(raw: string, places: RawPlace[]): RawPlace | null {
   const sig = schoolSig(raw.replace(/^\s*school\s*:\s*/i, ""));
   const hits = places.filter((p) => sameSchool(sig, p));
   if (!hits.length) return null;
@@ -882,31 +882,58 @@ export function routeSheet(
   }
   const graph = buildGraph(graphLines, linkKeys);
   const available = keysInGraph(graph);
-  const first = sheet.stops[0];
-  const loc = classifyLocation(first.description);
-  let starts: GraphNode[] = [];
-  if (loc.kind === "intersection") {
-    const a = resolveTarget(loc.a, available, data.places);
-    const b = resolveTarget(loc.b, available, data.places);
-    starts = intersectionNodes(graph, a.key, b.key);
-    if (!starts.length) {
-      return {
-        ok: false,
-        error: `Couldn't find the intersection of ${loc.a} and ${loc.b} in this map area. Check the spelling, or widen the area.`,
-        warnings: [],
-      };
+  // Where the track starts: the first stop, or, when the map can't place it,
+  // the next stop that it can (the start is then flagged for the driver to check).
+  const startsFor = (k: number): GraphNode[] => {
+    const stop = sheet.stops[k];
+    const loc = classifyLocation(stop.description);
+    if (loc.kind === "intersection") {
+      const a = resolveTarget(loc.a, available, data.places);
+      const b = resolveTarget(loc.b, available, data.places);
+      return intersectionNodes(graph, a.key, b.key);
     }
-  } else {
     const street =
-      loc.kind === "end" || loc.kind === "street" ? loc.street : first.maneuvers[0]?.street ?? "";
+      loc.kind === "end" || loc.kind === "street"
+        ? loc.street
+        : loc.kind === "school"
+          ? loc.name
+          : // A Deadhead with no directions of its own starts where the next stop's directions do.
+            stop.maneuvers[0]?.street ?? sheet.stops[k + 1]?.maneuvers[0]?.street ?? "";
     const key = street ? resolveTarget(street, available, data.places).key : "";
+    const out: GraphNode[] = [];
+    if (!key) return out;
+    for (const n of graph.nodes.values()) {
+      if (nodeHas(n, key)) out.push(n);
+      if (out.length > 12) break;
+    }
+    return out;
+  };
+  let starts: GraphNode[] = [];
+  let startAt = 0;
+  for (let k = 0; k < Math.min(sheet.stops.length, 4) && !starts.length; k++) {
+    starts = startsFor(k);
+    startAt = k;
+  }
+  if (!starts.length) {
+    // Last resort: anywhere on the first street the sheet drives.
+    const firstStreet = flattenManeuvers(sheet)[0]?.maneuver.street;
+    const key = firstStreet ? resolveTarget(firstStreet, available, data.places).key : "";
     for (const n of graph.nodes.values()) {
       if (key && nodeHas(n, key)) starts.push(n);
       if (starts.length > 12) break;
     }
+    startAt = -1;
   }
   if (!starts.length) {
-    return { ok: false, error: "Couldn't find the first stop on the map.", warnings: [] };
+    const loc = classifyLocation(sheet.stops[0].description);
+    return {
+      ok: false,
+      error:
+        loc.kind === "intersection"
+          ? `Couldn't find the intersection of ${loc.a} and ${loc.b} in this map area. Check the spelling, or widen the area.`
+          : "Couldn't find the first stop on the map. Check its street names.",
+      warnings: [],
+    };
   }
 
   // Intersections of two long roads can repeat. Try a handful and keep the cleanest trace.
@@ -918,6 +945,16 @@ export function routeSheet(
   }
   if (!best || best.coords.length < 2) {
     return { ok: false, error: "The streets on the sheet did not connect into a route.", warnings: best?.warnings ?? [] };
+  }
+  if (startAt !== 0) {
+    best.warnings.unshift({
+      level: "warn",
+      stopIndex: 0,
+      maneuverIndex: -1,
+      message: `Couldn't place the first stop (${sheet.stops[0].description}) on the map, so the track starts at ${
+        startAt > 0 ? `stop ${startAt + 1}` : "the first street on the sheet"
+      }. Check the start.`,
+    });
   }
   return best;
 }

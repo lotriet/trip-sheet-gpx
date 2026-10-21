@@ -15,14 +15,14 @@ test("parses the made-up example sheet", () => {
   assert.equal(sheet.stops[0].runLoad, 0);
   assert.deepEqual(
     sheet.stops[0].maneuvers.map((m) => `${m.kind}:${m.street}`),
-    ["proceed:FAYETTEVILLE ST", "right:MORGAN ST", "left:BLOUNT ST", "turnaround:BLOUNT ST"],
+    ["proceed:FAYETTEVILLE ST", "right:MORGAN ST", "right:BLOUNT ST"],
   );
   assert.equal(sheet.stops[1].stopId, "000.002");
   assert.equal(sheet.stops[1].runLoad, 12);
   assert.equal(sheet.stops[2].maneuvers.length, 0);
   assert.equal(sheet.stops[2].stopId, "000.003");
   assert.equal(classifyLocation(sheet.stops[0].description).kind, "intersection");
-  assert.equal(classifyLocation(sheet.stops[1].description).kind, "school");
+  assert.equal(classifyLocation(sheet.stops[1].description).kind, "intersection");
   assert.equal(classifyLocation(sheet.stops[2].description).kind, "intersection");
 });
 

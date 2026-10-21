@@ -1,5 +1,6 @@
 import { decodeTiles, type TileBuffer } from "./engine/tiles";
 import { expandPlaceQuery, looksLikePlace, titleCaseStreet } from "./engine/names";
+import { classifyLocation } from "./engine/parseSheet";
 import type { LonLat, RawLine, RawPlace, Sheet } from "./engine/types";
 
 export type MapData = { lines: RawLine[]; places: RawPlace[] };
@@ -25,9 +26,15 @@ function streetQuery(raw: string): string {
   return titleCaseStreet(raw).replace(/\bPkwy\b/g, "Parkway").replace(/\bHwy\b/g, "Highway");
 }
 
-async function photon(query: string, bias: { lat: number; lon: number }): Promise<PhotonFeature[]> {
+async function photon(
+  query: string,
+  bias: { lat: number; lon: number },
+  filter?: { tag?: string; layer?: string },
+): Promise<PhotonFeature[]> {
   const url = new URL("https://photon.komoot.io/api/");
   url.searchParams.set("q", query);
+  if (filter?.tag) url.searchParams.set("osm_tag", filter.tag);
+  if (filter?.layer) url.searchParams.set("layer", filter.layer);
   url.searchParams.set("lat", String(bias.lat));
   url.searchParams.set("lon", String(bias.lon));
   url.searchParams.set("limit", "5");
@@ -118,10 +125,29 @@ function sheetQueries(sheet: Sheet): string[] {
     seen.add(key);
     out.push(q);
   };
+  // Schools first: they anchor runs, and a stop line alone may name them.
+  for (const stop of sheet.stops) {
+    const loc = classifyLocation(stop.description);
+    if (loc.kind === "school") add(loc.name);
+  }
   for (const stop of sheet.stops) {
     for (const m of stop.maneuvers) add(m.street);
   }
-  return out.slice(0, 8);
+  return out.slice(0, 10);
+}
+
+/**
+ * Look a school up as a school and a street as a street. A plain search for
+ * "Oak St" mostly returns bus stops named after it, which are thrown away, so
+ * the map area fell back to a box around the county center that could miss
+ * the run entirely.
+ */
+async function geocode(query: string, bias: { lat: number; lon: number }): Promise<PhotonFeature[]> {
+  const first = /\bschool\b/i.test(query)
+    ? await photon(query, bias, { tag: "amenity:school" })
+    : await photon(query, bias, { layer: "street" });
+  if (first.some((f) => keepFeature(f, bias))) return first;
+  return photon(query, bias);
 }
 
 async function areaBias(area: string): Promise<{ lat: number; lon: number; label: string }> {
@@ -192,7 +218,7 @@ export async function loadMap(
   const points: { lon: number; lat: number; extent?: Bbox }[] = [];
   for (const q of queries) {
     try {
-      const features = await photon(q, bias);
+      const features = await geocode(q, bias);
       for (const f of features) {
         const k = keepFeature(f, bias);
         if (k) {

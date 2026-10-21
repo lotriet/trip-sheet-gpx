@@ -70,17 +70,17 @@ const STREET_WORD =
 /** "OAK HS" is a campus, not a named street. "Oak School Road" is a street. */
 export function looksLikePlace(raw: string): boolean {
   if (STREET_WORD.test(raw)) return false;
-  return /\b(hs|es|ms|high\s+school|elementary|middle\s+school|school)\b/i.test(raw);
+  return /\b(hs|es|ms|elem|high\s*school|elementary|middle\s*school|school)\b/i.test(raw);
 }
 
 export function schoolSig(name: string): { tokens: string; level: string } {
-  let s = name.toLowerCase().replace(/[^a-z0-9\s]/g, " ").replace(/\s+/g, " ").trim();
+  let s = placeName(name).toLowerCase().replace(/[^a-z0-9\s]/g, " ").replace(/\s+/g, " ").trim();
   let level = "";
   if (/\b(high\s+school|highschool|hs)\b/.test(s)) level = "high";
   else if (/\b(elementary|elem|es)\b/.test(s)) level = "elem";
   else if (/\b(middle|ms)\b/.test(s)) level = "mid";
   s = s.replace(
-    /\b(high\s+school|elementary\s+school|middle\s+school|highschool|school|high|elementary|middle|hs|es|ms)\b/g,
+    /\b(high\s+school|elementary\s+school|middle\s+school|highschool|middleschool|school|high|elementary|elem|middle|hs|es|ms)\b/g,
     " ",
   );
   const tokens = s
@@ -100,10 +100,22 @@ export function sameSchool(
 }
 
 /** "OAK HS" -> "Oak High School" for geocoders. */
+/** Just the place name from a stop line: "Deadhead - 1 OAK HS 0 0 @AB.012" -> "OAK HS". */
+export function placeName(raw: string): string {
+  return raw
+    .replace(/^\s*deadhead\s*-?\s*/i, "")
+    .replace(/^\s*school\s*:\s*/i, "")
+    .replace(/\s+\S{1,3}\s+\S{1,3}\s+[0-9@][0-9A-Za-z]{2}\.?[0-9A-Za-z]{3}\s*$/, "")
+    .replace(/\s*-?\s*\(?\bdoorside\b\)?.*$/i, "")
+    .replace(/^\d+\s+/, "")
+    .trim();
+}
+
 export function expandPlaceQuery(raw: string): string {
-  let s = raw.replace(/^\s*school\s*:\s*/i, "").trim();
-  s = s.replace(/\bHS\b/gi, "High School").replace(/\bES\b/gi, "Elementary School").replace(/\bMS\b/gi, "Middle School");
-  return s;
+  return placeName(raw)
+    .replace(/\bHS\b/gi, "High School")
+    .replace(/\b(?:ES|ELEM)\b/gi, "Elementary School")
+    .replace(/\bMS\b/gi, "Middle School");
 }
 
 export function titleCaseStreet(raw: string): string {

@@ -61,7 +61,12 @@ export async function decodeTiles(tiles: TileBuffer[]): Promise<{ lines: RawLine
         const name = str(p.name).trim();
         if (/\b(trail|greenway|sidewalk|footway|cycleway)\b/i.test(name)) continue;
         const keys: string[] = [];
-        if (name) keys.push(canonicalKey(name));
+        if (name) {
+          keys.push(canonicalKey(name));
+          // Sheets print "HARGETT ST" for OSM's "East Hargett Street".
+          const bare = name.replace(/^(?:north|south|east|west|n|s|e|w)\.?\s+(?=\S+\s+\S)/i, "");
+          if (bare !== name) keys.push(canonicalKey(bare));
+        }
         const network = `${str(p.network)} ${str(p.route_1_network)}`;
         const ref = str(p.ref || p.route_1_ref);
         const rk = ref ? routeKeyFromRef(ref, network) : null;

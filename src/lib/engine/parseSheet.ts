@@ -1,3 +1,4 @@
+import { looksLikePlace } from "./names";
 import type { Maneuver, ManeuverKind, Sheet, Stop, StopLocation } from "./types";
 
 const BOILER =
@@ -96,9 +97,13 @@ function tidyStreet(s: string): string {
 export function classifyLocation(description: string): StopLocation {
   let d = description.replace(/\s+/g, " ").trim();
   d = d.replace(/^\s*deadhead\s*-?\s*/i, "").trim();
-  d = d.replace(/\s*-\s*doorside\b.*$/i, "").trim();
+  // "- DOORSIDE", "(DOORSIDE)", or "DOORSIDE" wrapped onto its own line.
+  d = d.replace(/\s*-?\s*\(?\bdoorside\b\)?.*$/i, "").replace(/\s*-\s*$/, "").trim();
   const school = d.match(/^(?:school\s*:\s*)(.+)$/i);
   if (school) return { kind: "school", name: school[1].trim() };
+  // "1 OAK HS": a campus written with a street number.
+  const campus = d.replace(/^\d+\s+/, "");
+  if (campus !== d && looksLikePlace(campus)) return { kind: "school", name: campus };
   if (/@/.test(d) || /end of(?: the)? (sidewalk|road|street|court)/i.test(d)) {
     const street = d.split("@")[0].replace(/\bend of\b.*$/i, "").trim();
     if (street) return { kind: "end", street };
