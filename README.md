@@ -2,7 +2,7 @@
 
 A phone-friendly page that turns a Wake County (WCPSS) **Driver Directions by Route** sheet into a GPX track for [OsmAnd](https://osmand.net/).
 
-The track follows the printed streets **in order**, with the printed turn directions. It does not shorten the run or skip a street. You can stack several runs into one day, then download either one combined track or a zip of separate tracks.
+The track follows the printed streets **in order**, with the printed turn directions. It does not shorten the run or skip a street. You can stack several runs into one day, then download either one combined track or every run's track at once.
 
 Photos and sheet text stay in the browser. Nothing is uploaded or stored on a server. The day list is kept in this phone’s browser storage (IndexedDB).
 
@@ -10,7 +10,9 @@ Photos and sheet text stay in the browser. Nothing is uploaded or stored on a se
 
 1. Open the page in Safari or Chrome. Add it to the home screen if you want it one tap away.
 2. Tap **Add a run**. The area starts as Wake County, North Carolina. Change it if the sheet is somewhere else.
-3. Take one or more photos of the sheet, or paste the text. Several pages are fine — add every photo before you build the route.
+3. Take one or more photos of the sheet, or paste the text. Several pages are fine — add every photo before you build the route. Photos of a whole shift (several runs) are sorted by their **Run:** number into one row per trip; check the rows (move a photo if one landed in the wrong trip), then **Build** them all at once. Each run is added to the day list in start-time order.
+
+In the form, a green ✓ next to a street or stop means it was found on the map near the other stops. A red **?** means it wasn't (often a misread letter); tap it for the closest real names.
 4. Check the stop list. Fix any street the reader got wrong, then tap **Build the route**.
 5. The map shows the line and numbered stops. Orange dots are turnarounds the app had to guess (the end of a court, a loop, a school driveway). Tap **Move**, then tap the map if the bus turns around somewhere else. **Add a via point** forces the line through a spot you tap.
 6. Tap **Add to today’s list**. Repeat for the other runs you drive that day. Use **Up** and **Down** so the list matches the order you drive them.
@@ -25,13 +27,13 @@ Waypoints look like `Run 2 3:25 PM School: Oak Academy`.
 
 In OsmAnd: tap the GPX file, choose **Open in OsmAnd**, then **Navigation → Follow track**, and tap **Apply** on **Attach to the roads**.
 
-### A zip of separate tracks
+### Every run's track at once
 
-**Zip of separate GPX** gives one file per run, named so they sort in order in OsmAnd’s Tracks folder:
+**Share all** (iPhone and Android) opens the share sheet with one GPX per run; pick OsmAnd or Save to Files. Browsers that can't share files show **Download all**, which downloads each file. Files are named by run number:
 
-`01_SAMPLE_OakAcademy_0315PM.gpx`
+`run_900101.gpx`
 
-Unzip it (Files on iPhone, or the zip app on Android), then import each track. Follow them one at a time, in name order: tap the GPX, **Open in OsmAnd**, **Navigation → Follow track**, **Apply** for **Attach to the roads**.
+Follow them one at a time: tap the GPX, **Open in OsmAnd**, **Navigation → Follow track**, **Apply** for **Attach to the roads**.
 
 Clear the list with **Remove** when the day is done. The list survives a reload. It does not sync to another phone.
 

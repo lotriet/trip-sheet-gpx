@@ -48,7 +48,7 @@ test("ignores stray OCR marks around lines from a phone photo", () => {
   const sheet = parseSheet(`__ Route: DEMO Description: FAKE EXAMPLE OAK ACADEMY Run: 999.001
 i private streets, etc..) make a note on this sheet
 | Stop Time Description Stop Load Run Ld Stop ID
-02:28 PM Deadhead - 1 OAK ACADEMY 0 0 @CP.046
+02:28 PM Deadhead - 1 OAK ACADEMY 0 0 @AB.012
 : 02:30 PM SCHOOL: OAK ACADEMY 0 36 999.000
 Proceed On OAK ACADEMY
 Tum Around On OAK ACADEMY
@@ -68,7 +68,7 @@ Seba
   assert.deepEqual(
     sheet.stops.map((s) => [s.time, s.description, s.stopId]),
     [
-      ["2:28 PM", "Deadhead - 1 OAK ACADEMY", "@CP.046"],
+      ["2:28 PM", "Deadhead - 1 OAK ACADEMY", "@AB.012"],
       ["2:30 PM", "SCHOOL: OAK ACADEMY", "999.000"],
       ["2:36 PM", "ELM DR & MAPLE AVE", "999.043"],
       ["2:40 PM", "CEDAR LN & BIRCH RD", "999.041"],
