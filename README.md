@@ -64,6 +64,8 @@ That policy is for light, interactive viewing. One driver building a handful of 
 
 The first time you read a photo, the OCR engine (Tesseract) may download its language data from jsDelivr. The photo itself never leaves the phone. The worker script is served from this app. If OCR fails, paste the sheet text; that path needs no OCR download.
 
+How a photo is read (`src/lib/ocr.ts`, `src/lib/ocr/`): the photo is decoded upright (iPhone HEIC photos are converted in the browser when the browser can't open them), the white page is found and everything around it is painted white, the page is scaled so the print is about 30 px tall, and shadows are evened out. A sideways or upside-down page is retried in the other direction. Lines the reader isn't confident about are dropped, and a photo that doesn't read like a trip sheet is refused with a "retake it" message instead of filling the form with gibberish. Photos for one run should be added together; photos from different runs get a warning.
+
 ## Static build
 
 ```bash

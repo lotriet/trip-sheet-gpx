@@ -13,7 +13,8 @@ import { parseSheet } from "@/lib/engine/parseSheet";
 import { routeSheet } from "@/lib/engine/route";
 import type { LonLat, Maneuver, ManeuverKind, RouteOverrides, RouteSuccess, Sheet, TurnaroundPin } from "@/lib/engine/types";
 import { loadCorridor, loadMap, type MapData } from "@/lib/mapfetch";
-import { readSheetPhoto } from "@/lib/ocr";
+import { readSheetPhotos } from "@/lib/ocr";
+import { RETAKE_MESSAGE } from "@/lib/ocr/quality";
 import { loadDay, saveDay, type SavedRun } from "@/lib/storage";
 import { zipStore } from "@/lib/zipStore";
 
@@ -119,19 +120,37 @@ export function TripApp() {
     setSheet(parsed);
   }
 
-  async function onPhotos(files: FileList | null) {
-    if (!files?.length) return;
+  async function onPhotos(input: HTMLInputElement) {
+    const files = input.files ? Array.from(input.files) : [];
+    // Let the same photo be picked again after a retake.
+    input.value = "";
+    if (!files.length) return;
     setError("");
-    const chunks: string[] = [];
-    for (const file of Array.from(files)) {
-      try {
-        chunks.push(await readSheetPhoto(file, setStatus));
-      } catch (err) {
-        setError(err instanceof Error ? err.message : "The photo could not be read. Type the directions instead.");
-      }
+    let results: Awaited<ReturnType<typeof readSheetPhotos>> = [];
+    try {
+      results = await readSheetPhotos(files, setStatus);
+    } catch {
+      setStatus("");
+      setError("The text reader didn't load. Check the internet connection and try again, or type the directions.");
+      return;
     }
     setStatus("");
-    if (chunks.length) applyText([text, ...chunks].filter(Boolean).join("\n"));
+    const good = results.filter((r) => r.ok);
+    const bad = results.filter((r) => !r.ok);
+    if (good.length) applyText([text, ...good.map((r) => r.text)].filter(Boolean).join("\n"));
+    const notes: string[] = [];
+    if (bad.length) {
+      notes.push(
+        results.length === 1
+          ? bad[0].reason
+          : `Couldn't read ${bad.length} of ${results.length} photos (${bad.map((r) => r.name).join(", ")}). ${RETAKE_MESSAGE.replace("Couldn't read this photo. ", "")}`,
+      );
+    }
+    const runNumbers = [...new Set(good.map((r) => r.text.match(/\brun\s*:\s*([0-9]{3}\s?\.\s?[0-9]{2,3})/i)?.[1]?.replace(/\s/g, "")).filter(Boolean))];
+    if (runNumbers.length > 1) {
+      notes.push(`These photos are from ${runNumbers.length} different runs (${runNumbers.join(", ")}). Add each run on its own so each gets its own track.`);
+    }
+    if (notes.length) setError(notes.join(" "));
   }
 
   function updateManeuver(si: number, mi: number, patch: Partial<Maneuver>) {
@@ -147,17 +166,26 @@ export function TripApp() {
 
   async function generate(nextOverrides = overrides) {
     setError("");
-    if (!sheet.stops.length) {
+    let current = sheet;
+    if (!current.stops.length && text.trim()) {
+      // Pasted text that was never read: read it now.
+      const parsed = parseSheet(text);
+      if (parsed.stops.length) {
+        current = parsed;
+        setSheet(parsed);
+      }
+    }
+    if (!current.stops.length) {
       setError("Add at least one stop before building the route.");
       return;
     }
     setStatus("Building the route…");
     try {
-      const data = mapData && loadedArea === area ? mapData : await loadMap(sheet, area, setStatus);
+      const data = mapData && loadedArea === area ? mapData : await loadMap(current, area, setStatus);
       setMapData(data);
       setLoadedArea(area);
       setStatus("Following the printed streets…");
-      const result = routeSheet(sheet, data, nextOverrides);
+      const result = routeSheet(current, data, nextOverrides);
       if (!result.ok) {
         setError(result.error);
         setStatus("");
@@ -356,11 +384,11 @@ export function TripApp() {
           <div className="grid grid-cols-2 gap-2">
             <label className="flex h-12 cursor-pointer items-center justify-center rounded-lg bg-[#0f2744] text-sm font-medium text-white">
               Take photos
-              <input className="sr-only" type="file" accept="image/*" capture="environment" multiple onChange={(e) => void onPhotos(e.target.files)} />
+              <input className="sr-only" type="file" accept="image/*,.heic,.heif" capture="environment" multiple onChange={(e) => void onPhotos(e.currentTarget)} />
             </label>
             <label className="flex h-12 cursor-pointer items-center justify-center rounded-lg bg-white text-sm font-medium ring-1 ring-[#d9d2c3]">
               Choose photos
-              <input className="sr-only" type="file" accept="image/*" multiple onChange={(e) => void onPhotos(e.target.files)} />
+              <input className="sr-only" type="file" accept="image/*,.heic,.heif" multiple onChange={(e) => void onPhotos(e.currentTarget)} />
             </label>
           </div>
           <label className="text-sm font-medium">
@@ -431,7 +459,7 @@ export function TripApp() {
               <Button type="button" variant="outline" className="h-12 flex-1" onClick={() => setView("day")}>
                 Back
               </Button>
-              <Button type="button" className="h-12 flex-[2] bg-[#0f2744] text-base text-white" onClick={() => void generate()}>
+              <Button type="button" className="h-12 flex-[2] bg-[#0f2744] text-base text-white" disabled={(!sheet.stops.length && !text.trim()) || !!status} onClick={() => void generate()}>
                 Build the route
               </Button>
             </div>

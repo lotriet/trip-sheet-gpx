@@ -42,3 +42,47 @@ Left Turn On BLOUNT ST
   assert.equal(sheet.stops[0].maneuvers[2].kind, "left");
   assert.equal(sheet.description, "FAKE EXAMPLE OAK ACADEMY");
 });
+
+test("ignores stray OCR marks around lines from a phone photo", () => {
+  // Made-up streets; the shape mimics real OCR output from a photo.
+  const sheet = parseSheet(`__ Route: DEMO Description: FAKE EXAMPLE OAK ACADEMY Run: 999.001
+i private streets, etc..) make a note on this sheet
+| Stop Time Description Stop Load Run Ld Stop ID
+02:28 PM Deadhead - 1 OAK ACADEMY 0 0 @CP.046
+: 02:30 PM SCHOOL: OAK ACADEMY 0 36 999.000
+Proceed On OAK ACADEMY
+Tum Around On OAK ACADEMY
+Right Turn Onto MAPLE AVE L
+i 02:36 PM ELM DR & MAPLE AVE 9 16 999.043
+; Proceed On MAPLE AVE -
+Left Tun Onto CEDAR LN i
+Right Turn Onto BIRCH RD 5
+02:40PM CEDAR LN & BIRCH RD H 0 999041
+02:44PM PINE CT & BIRCH RD - 0 0 999.X01
+DOORSIDE
+=
+Seba
+`);
+  assert.equal(sheet.route, "DEMO");
+  assert.equal(sheet.run, "999.001");
+  assert.deepEqual(
+    sheet.stops.map((s) => [s.time, s.description, s.stopId]),
+    [
+      ["2:28 PM", "Deadhead - 1 OAK ACADEMY", "@CP.046"],
+      ["2:30 PM", "SCHOOL: OAK ACADEMY", "999.000"],
+      ["2:36 PM", "ELM DR & MAPLE AVE", "999.043"],
+      ["2:40 PM", "CEDAR LN & BIRCH RD", "999.041"],
+      ["2:44 PM", "PINE CT & BIRCH RD DOORSIDE", "999.X01"],
+    ],
+  );
+  assert.deepEqual(
+    sheet.stops[1].maneuvers.map((m) => `${m.kind}:${m.street}`),
+    ["proceed:OAK ACADEMY", "turnaround:OAK ACADEMY", "right:MAPLE AVE"],
+  );
+  assert.deepEqual(
+    sheet.stops[2].maneuvers.map((m) => `${m.kind}:${m.street}`),
+    ["proceed:MAPLE AVE", "left:CEDAR LN", "right:BIRCH RD"],
+  );
+  assert.equal(sheet.stops[2].stopLoad, 9);
+  assert.equal(sheet.stops[2].runLoad, 16);
+});

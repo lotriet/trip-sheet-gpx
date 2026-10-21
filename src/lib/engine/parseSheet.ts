@@ -6,23 +6,72 @@ const BOILER =
 function cleanLine(s: string): string {
   return s
     .replace(/[|]/g, " ")
-    .replace(/\btum\b/gi, "Turn")
-    .replace(/\b0nto\b/gi, "Onto")
+    .replace(/[[\]{}]/g, "")
+    .replace(/\btu[mn]\b/gi, "Turn")
+    .replace(/\b[0O]nt[o0]\b/g, "Onto")
     .replace(/\s+/g, " ")
+    .trim()
+    // OCR often adds stray marks from the page edge before or after a line.
+    .replace(/^[^A-Za-z0-9]+/, "")
+    // A stray mark or letter in front of a time or a direction: "i 02:36 PM ...".
+    .replace(/^(?:\S{1,2}\s+){1,3}(?=(?:\d{1,2}\s?:\s?\d{2}|proceed|continue|right|left|turn)\b)/i, "")
+    .replace(/[^A-Za-z0-9)]+$/, "")
     .trim();
 }
 
-function peelTail(s: string): {
+const SUFFIX =
+  /\b(?:RD|DR|LN|ST|AVE|AV|CT|WAY|PKWY|PKY|HWY|BLVD|CIR|PL|TRL|TR|LOOP|TER|XING|RUN|PATH|SQ|ROW|PT|HS|MS|ES|EXPY|FWY)\b/;
+
+/** Drop OCR crumbs after a street name: "MAIN ST i", "OAK DR 5", "ELM AVE L". */
+function trimCrumbs(s: string): string {
+  let out = s.trim();
+  for (;;) {
+    const m = out.match(/^(.*\S)\s+(\S+)$/);
+    if (!m) break;
+    const [, head, last] = m;
+    const crumb =
+      /^[^A-Za-z0-9]+$/.test(last) ||
+      /^[a-z]{1,3}$/.test(last) ||
+      (/^[A-Za-z0-9]$/.test(last) && SUFFIX.test(head.split(/\s+/).pop() ?? "")) ||
+      (/^\d{5}$/.test(last) && SUFFIX.test(head.split(/\s+/).pop() ?? ""));
+    if (!crumb) break;
+    out = head;
+  }
+  return out;
+}
+
+/** A wrapped stop description is printed in capitals: street names, &, @, numbers. */
+function looksLikeDescription(line: string): boolean {
+  const letters = line.replace(/[^A-Za-z]/g, "");
+  if (letters.length < 3) return false;
+  const upper = letters.replace(/[^A-Z]/g, "").length;
+  return upper / letters.length > 0.8 && /[A-Z]{3,}/.test(line) && !/[^A-Za-z0-9 &@().,'/#-]/.test(line);
+}
+
+// "123.045", "@AB.012", "123.X01"; OCR sometimes drops the dot ("123045").
+const STOP_ID = String.raw`[0-9@][0-9A-Za-z]{2}\.?[0-9A-Za-z]{3}`;
+
+function fixId(id: string): string {
+  return id.includes(".") ? id : `${id.slice(0, 3)}.${id.slice(3)}`;
+}
+
+function readLoad(s: string): number | null {
+  const n = Number(s.replace(/[Oo]/g, "0").replace(/[Il|]/g, "1"));
+  return Number.isFinite(n) ? n : null;
+}
+
+function peelTail(raw: string): {
   text: string;
   stopLoad: number | null;
   runLoad: number | null;
   stopId: string | null;
 } {
-  const full = s.match(/^(.*?)(?:\s+(\d+)\s+(\d+)\s+(\d{3}\.\d{3}))\s*$/);
+  const s = trimCrumbs(raw);
+  const full = s.match(new RegExp(String.raw`^(.*?)(?:\s+-)?\s+(\S{1,3})\s+(\S{1,3})\s+(${STOP_ID})\s*$`));
   if (full && full[1].trim()) {
-    return { text: full[1].trim(), stopLoad: Number(full[2]), runLoad: Number(full[3]), stopId: full[4] };
+    return { text: full[1].trim(), stopLoad: readLoad(full[2]), runLoad: readLoad(full[3]), stopId: fixId(full[4]) };
   }
-  const idOnly = s.match(/^(.*\D)\s+(\d{3}\.\d{3})\s*$/);
+  const idOnly = s.match(/^(.*\D)\s+([0-9@][0-9A-Za-z]{2}\.[0-9A-Za-z]{3})\s*$/);
   if (idOnly) return { text: idOnly[1].trim(), stopLoad: null, runLoad: null, stopId: idOnly[2] };
   return { text: s.trim(), stopLoad: null, runLoad: null, stopId: null };
 }
@@ -41,7 +90,7 @@ function parseManeuver(line: string): Maneuver | null {
 }
 
 function tidyStreet(s: string): string {
-  return s.replace(/\s+\d{3}\.\d{3}\s*$/, "").replace(/[.,;:]+$/, "").trim();
+  return trimCrumbs(s.replace(/\s+\d{3}\.\d{3}\s*$/, "").replace(/[.,;:]+$/, "").trim());
 }
 
 export function classifyLocation(description: string): StopLocation {
@@ -60,7 +109,9 @@ export function classifyLocation(description: string): StopLocation {
   return { kind: "unknown" };
 }
 
-function emptyStop(time: string, description: string): Stop {
+type ParsingStop = Stop & { wrapped?: number };
+
+function emptyStop(time: string, description: string): ParsingStop {
   const peeled = peelTail(description);
   return {
     time,
@@ -83,8 +134,8 @@ export function parseSheet(raw: string): Sheet {
   const description =
     text.match(/description\s*:\s*([^\n]+?)(?=\s+run\s*:|\s*$)/im)?.[1]?.trim() ?? "";
 
-  const stops: Stop[] = [];
-  let current: Stop | null = null;
+  const stops: ParsingStop[] = [];
+  let current: ParsingStop | null = null;
 
   const pushManeuver = (kind: ManeuverKind, street: string) => {
     if (!current) {
@@ -128,8 +179,9 @@ export function parseSheet(raw: string): Sheet {
       continue;
     }
 
-    // A wrapped description line before any maneuvers.
-    if (current && current.maneuvers.length === 0 && !/^\d+$/.test(line)) {
+    // A wrapped description line right after the stop line, before any maneuvers.
+    if (current && current.maneuvers.length === 0 && (current.wrapped ?? 0) < 1 && looksLikeDescription(line)) {
+      current.wrapped = (current.wrapped ?? 0) + 1;
       const peeled = peelTail(line);
       current.description = `${current.description} ${peeled.text}`.trim();
       if (peeled.stopId && current.stopId == null) {
@@ -145,7 +197,12 @@ export function parseSheet(raw: string): Sheet {
     route,
     description: description.replace(/\s+run\s*:.*$/i, "").trim(),
     run,
-    stops: stops.filter((s) => s.description || s.maneuvers.length || s.time),
+    stops: stops
+      .filter((s) => s.description || s.maneuvers.length || s.time)
+      .map((stop) => {
+        delete stop.wrapped;
+        return stop as Stop;
+      }),
   };
 }
 
