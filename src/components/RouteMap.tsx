@@ -41,20 +41,25 @@ export default function RouteMap({
   coords,
   stops,
   turnarounds,
+  vias = [],
   selectedTurnaround,
+  picking = false,
   onMapClick,
 }: {
   coords: LonLat[];
   stops: StopPin[];
   turnarounds: TurnaroundPin[];
+  vias?: { lat: number; lon: number }[];
   selectedTurnaround?: string | null;
+  /** The next tap should add a via, so the map takes the touch instead of the page. */
+  picking?: boolean;
   onMapClick?: (lat: number, lon: number) => void;
 }) {
   const center: [number, number] = coords.length
     ? [coords[Math.floor(coords.length / 2)][1], coords[Math.floor(coords.length / 2)][0]]
     : [35.8, -78.78];
   return (
-    <MapContainer center={center} zoom={13} className="h-[min(70vh,520px)] w-full rounded-xl" scrollWheelZoom>
+    <MapContainer center={center} zoom={13} className={`h-[min(55vh,420px)] w-full rounded-xl touch-none ${picking ? "ring-4 ring-[#f5c451]" : ""}`} scrollWheelZoom>
       <TileLayer
         attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
         url="https://tile.openstreetmap.org/{z}/{x}/{y}.png"
@@ -66,6 +71,14 @@ export default function RouteMap({
       )}
       {stops.map((s, i) => (
         <Marker key={`${s.lat}-${s.lon}-${i}`} position={[s.lat, s.lon]} icon={numberIcon(i + 1)} title={s.label} />
+      ))}
+      {vias.map((v, i) => (
+        <CircleMarker
+          key={`via-${i}-${v.lat}-${v.lon}`}
+          center={[v.lat, v.lon]}
+          radius={10}
+          pathOptions={{ color: "#1e3a8a", fillColor: "#2563eb", fillOpacity: 0.95, weight: 2 }}
+        />
       ))}
       {turnarounds.map((t) => (
         <CircleMarker

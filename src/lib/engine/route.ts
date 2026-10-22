@@ -8,6 +8,7 @@ import {
   minDistToLine,
   nearestIndex,
   polylineMeters,
+  projectPoint,
   turnAngle,
 } from "./geo";
 import { buildGraph, edgeHas, edgeServes, keysInGraph, nodeHas, type Graph, type GraphEdge, type GraphLine, type GraphNode } from "./graph";
@@ -435,6 +436,19 @@ function nearestNode(graph: Graph, key: string, point: LonLat, maxM: number): Gr
   return best?.n ?? null;
 }
 
+/** Closest spot on this street's pavement, not only an intersection. */
+function nearestAlong(graph: Graph, key: string, point: LonLat, maxM: number): { edge: GraphEdge; point: LonLat } | null {
+  let best: { edge: GraphEdge; point: LonLat; d: number } | null = null;
+  for (const edge of graph.edges) {
+    if (!edgeServes(edge, key)) continue;
+    for (let i = 1; i < edge.coords.length; i++) {
+      const proj = projectPoint(point, edge.coords[i - 1], edge.coords[i]);
+      if (proj.d <= maxM && (!best || proj.d < best.d)) best = { edge, point: proj.point, d: proj.d };
+    }
+  }
+  return best;
+}
+
 type WalkEnd = {
   coords: LonLat[];
   node: GraphNode;
@@ -770,15 +784,24 @@ async function routeFrom(
   const hopVias = (key: string) => {
     for (const via of vias) {
       if (via.used) continue;
-      const hit = nearestNode(graph, key, [via.lon, via.lat], 40);
+      const point: LonLat = [via.lon, via.lat];
+      // A finger on the phone lands between intersections, often well off a 40 m node.
+      const hit = nearestAlong(graph, key, point, 400);
       if (!hit) continue;
+      let best: Travel | null = null;
+      for (const id of [hit.edge.to, hit.edge.from]) {
+        if (id === node.id) continue;
+        const leg = follow(graph, node, heading, key, { type: "node", id }, 8000);
+        if (!leg) continue;
+        if (minDistToLine(hit.point, leg.coords).d > 30) continue;
+        if (leg.meters > haversine(node.coord, hit.point) * 2.5 + 250) continue;
+        if (!best || leg.meters < best.meters) best = leg;
+      }
+      if (!best) continue;
       via.used = true;
-      if (hit.id === node.id) continue;
-      const leg = follow(graph, node, heading, key, { type: "node", id: hit.id }, 8000);
-      if (!leg) continue;
-      appendLine(coords, leg.coords, 0.4);
-      node = leg.node;
-      heading = leg.heading;
+      appendLine(coords, best.coords, 0.4);
+      node = best.node;
+      heading = best.heading;
     }
   };
 
@@ -935,6 +958,9 @@ async function routeFrom(
     });
   }
 
+  // A tap that never landed on the street being driven still has to move the track.
+  await pullVias(coords, vias, router, (message) => warn("info", 0, 0, message));
+
   // Place stops along the finished track.
   const placed = placeStops(sheet, coords, anchors, graph, available, places);
   const meters = polylineMeters(coords);
@@ -950,6 +976,60 @@ async function routeFrom(
     legs,
     gpx,
   };
+}
+
+/** How close a tap already is to the track before we bend the line out to it. */
+const VIA_ON_TRACK_M = 45;
+
+/**
+ * Points the driver added on the map. If the printed streets already pass
+ * there, leave the line. Otherwise bend the track out to that point and back,
+ * along roads when a router is available.
+ */
+async function pullVias(
+  coords: LonLat[],
+  vias: { lat: number; lon: number; used: boolean }[],
+  router: Router | undefined,
+  note: (message: string) => void,
+) {
+  for (const via of vias) {
+    const point: LonLat = [via.lon, via.lat];
+    if (coords.length < 2) continue;
+    if (minDistToLine(point, coords).d <= VIA_ON_TRACK_M) {
+      via.used = true;
+      continue;
+    }
+    const near = minDistToLine(point, coords).point;
+    let path: LonLat[] = [point];
+    if (router) {
+      try {
+        const driven = await router([near, point, near]);
+        if (driven && driven.length >= 2) path = driven;
+      } catch {
+        path = [point];
+      }
+    }
+    insertOutAndBack(coords, point, path);
+    via.used = true;
+    note("The track now passes through a point you added on the map.");
+  }
+}
+
+function insertOutAndBack(coords: LonLat[], point: LonLat, path: LonLat[]) {
+  let bestI = 1;
+  let bestD = Infinity;
+  let bestPoint: LonLat = coords[0];
+  for (let i = 1; i < coords.length; i++) {
+    const proj = projectPoint(point, coords[i - 1], coords[i]);
+    if (proj.d < bestD) {
+      bestD = proj.d;
+      bestI = i;
+      bestPoint = proj.point;
+    }
+  }
+  const mid = path.length > 2 ? path.slice(1, -1) : path;
+  const chunk = [bestPoint, ...mid, bestPoint].filter((p, i, arr) => i === 0 || haversine(arr[i - 1], p) > 0.6);
+  coords.splice(bestI, 0, ...chunk);
 }
 
 function placeStops(
