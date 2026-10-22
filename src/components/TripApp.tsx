@@ -896,6 +896,29 @@ export function TripApp() {
               </Button>
             </p>
           )}
+          {(overrides.vias?.length ?? 0) > 0 && (
+            <div className="rounded-xl bg-[#dbeafe] p-3 ring-1 ring-[#93c5fd]" data-waypoints>
+              <p className="text-base font-semibold">
+                {overrides.vias?.length} waypoint{overrides.vias?.length === 1 ? "" : "s"} on this run
+              </p>
+              <p className="mt-1 text-sm text-[#1e3a8a]">Not a stop. The track bends through each one, and that bend is in the GPX. Build the route again after a change.</p>
+              <ul className="mt-2 space-y-1">
+                {overrides.vias?.map((via, i) => (
+                  <li key={`${via.lat.toFixed(5)}-${via.lon.toFixed(5)}-${i}`} className="flex items-center justify-between gap-2 rounded-lg bg-white px-3 py-1">
+                    <span className="text-base">Waypoint {i + 1}</span>
+                    <button
+                      type="button"
+                      className="h-11 touch-manipulation rounded-lg px-3 text-base text-[#7f1d1d]"
+                      aria-label={`Remove waypoint ${i + 1}`}
+                      onClick={() => setOverrides({ ...overrides, vias: (overrides.vias ?? []).filter((_, j) => j !== i) })}
+                    >
+                      Remove
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
           {sheet.stops.length > 0 && (
             <div className="space-y-3">
               <div className="grid grid-cols-2 gap-2">
