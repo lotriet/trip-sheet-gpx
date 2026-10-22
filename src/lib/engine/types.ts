@@ -90,8 +90,8 @@ export type ViaPin = {
 export type RouteOverrides = {
   /** Move a guessed turnaround. Key is TurnaroundPin.id. */
   turnarounds?: Record<string, { lat: number; lon: number }>;
-  /** Extra points the track must pass, in order. */
-  vias?: { lat: number; lon: number }[];
+  /** Extra points the track must pass, in order. `street` is the road nearest the tap. */
+  vias?: { lat: number; lon: number; street?: string }[];
 };
 
 export type RouteLeg = {
@@ -112,6 +112,8 @@ export type RouteSuccess = {
   turnarounds: TurnaroundPin[];
   legs: RouteLeg[];
   gpx: string;
+  /** Street nearest each via, in the same order as the taps. Empty when no road was close. */
+  viaStreets: string[];
 };
 
 export type RouteFailure = {
