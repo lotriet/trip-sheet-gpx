@@ -70,7 +70,28 @@ export function checkStreet(index: StreetIndex, raw: string): StreetStatus {
   if (index.keys.has(key) || index.keys.has(key.replace(/\s+/g, ""))) return "found";
   // A space dropped or added by the reader: "MAPLEWOODMILL RD".
   const sq = squash(raw);
-  return index.names.some((n) => n.squash === sq) ? "found" : "missing";
+  if (index.names.some((n) => n.squash === sq)) return "found";
+  // The sheet says ROAD where the map says DRIVE: the route builder takes the
+  // one street of that name, so the check does too (and shows the map's name).
+  return looseName(index, raw) ? "found" : "missing";
+}
+
+const SUFFIXES = new Set(["st", "rd", "dr", "ln", "ct", "ave", "blvd", "pkwy", "cir", "pl", "trl", "ter", "way", "hwy", "xing"]);
+const stem = (key: string) => {
+  const w = key.split(" ");
+  return w.length > 1 && SUFFIXES.has(w.at(-1)!) ? w.slice(0, -1).join(" ") : key;
+};
+
+/** The map's name for a street the sheet writes a little differently, if there's exactly one. */
+export function looseName(index: StreetIndex, raw: string): string | null {
+  const key = canonicalKey(raw);
+  const sq = key.replace(/\s+/g, "");
+  const exact = index.names.find((n) => n.squash === sq);
+  if (exact) return canonicalKey(exact.display) === key ? null : exact.display;
+  const st = stem(key);
+  if (!st) return null;
+  const hits = index.names.filter((n) => stem(canonicalKey(n.display)) === st);
+  return hits.length === 1 ? hits[0].display : null;
 }
 
 function distance(a: string, b: string): number {

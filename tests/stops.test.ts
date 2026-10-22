@@ -7,7 +7,7 @@ import type { RawLine, RawPlace } from "../src/lib/engine/types";
 import { buildStreetIndex, checkStop, suggestFor } from "../src/lib/streetCheck";
 
 // Made-up streets and schools.
-test("school stop lines become a school search", () => {
+test("school stop lines become a school search", async () => {
   assert.equal(placeName("Deadhead - 1 OAK HS 0 0 @AB.012"), "OAK HS");
   assert.equal(placeName("SCHOOL: OAK HS"), "OAK HS");
   assert.equal(expandPlaceQuery("Deadhead - 1 OAK HS 0 0 @AB.012"), "OAK High School");
@@ -15,7 +15,7 @@ test("school stop lines become a school search", () => {
   assert.equal(expandPlaceQuery("SCHOOL: PINE DR ES"), "PINE DR Elementary School");
 });
 
-test("footer and confidentiality lines are not read as stops or directions", () => {
+test("footer and confidentiality lines are not read as stops or directions", async () => {
   const sheet = parseSheet(`Route: DEMO Description: OAK HS 01 Run: 900.101
 If the directions cannot be run according to TIMS (medians in the roadway, one way streets,
 private streets, etc..) make a note on this sheet and turn it in to your district office.
@@ -46,7 +46,7 @@ const lines = [
   line("Birch Lane", [[-78.7, 35.795], [-78.7, 35.8], [-78.7, 35.805]]),
 ];
 
-test("each stop says whether the map knows its streets or school", () => {
+test("each stop says whether the map knows its streets or school", async () => {
   const index = buildStreetIndex(lines, places);
   assert.deepEqual(checkStop(index, "MAPLE AVE & ELM ST"), { status: "found", missing: [] });
   assert.deepEqual(checkStop(index, "MAPLE AVE & ELN ST"), { status: "missing", missing: ["ELN ST"] });
@@ -57,14 +57,14 @@ test("each stop says whether the map knows its streets or school", () => {
   assert.equal(suggestFor(index, "OAKK HS")[0], "OAK HIGH SCHOOL");
 });
 
-test("a first stop the map can't place doesn't stop the build", () => {
+test("a first stop the map can't place doesn't stop the build", async () => {
   const sheet = parseSheet(`07:00 AM Deadhead - ZEBRA CT & QUAIL WAY 0 0 900.010
 Proceed On MAPLE AVE
 07:03 AM MAPLE AVE & ELM ST 2 2 900.011
 Proceed On MAPLE AVE
 Left Turn Onto BIRCH LN
 07:06 AM BIRCH LN & MAPLE AVE 2 0 900.012`);
-  const result = routeSheet(sheet, { lines, places: [] });
+  const result = await routeSheet(sheet, { lines, places: [] });
   assert.equal(result.ok, true, result.ok ? "" : result.error);
   if (result.ok) {
     assert.match(result.warnings[0].message, /Couldn't place the first stop/);

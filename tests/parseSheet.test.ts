@@ -9,18 +9,18 @@ test("parses the made-up example sheet", () => {
   assert.equal(sheet.description, "FAKE EXAMPLE OAK ACADEMY");
   assert.equal(sheet.run, "999.001");
   assert.equal(sheet.stops.length, 3);
-  assert.equal(sheet.stops[0].time, "3:15 PM");
+  assert.equal(sheet.stops[0].time, "7:05 AM");
   assert.equal(sheet.stops[0].stopId, "000.001");
   assert.equal(sheet.stops[0].stopLoad, 0);
   assert.equal(sheet.stops[0].runLoad, 0);
   assert.deepEqual(
     sheet.stops[0].maneuvers.map((m) => `${m.kind}:${m.street}`),
-    ["proceed:FAYETTEVILLE ST", "right:MORGAN ST", "right:BLOUNT ST"],
+    ["proceed:CRAVENRIDGE RD", "left:DUNHAVEN DR", "left:BUFFALOE RD", "right:OLD SCARBOROUGH LN"],
   );
   assert.equal(sheet.stops[1].stopId, "000.002");
-  assert.equal(sheet.stops[1].runLoad, 12);
+  assert.equal(sheet.stops[1].runLoad, 6);
   assert.equal(sheet.stops[2].maneuvers.length, 0);
-  assert.equal(sheet.stops[2].stopId, "000.003");
+  assert.equal(sheet.stops[2].stopId, "000.009");
   assert.equal(classifyLocation(sheet.stops[0].description).kind, "intersection");
   assert.equal(classifyLocation(sheet.stops[1].description).kind, "intersection");
   assert.equal(classifyLocation(sheet.stops[2].description).kind, "intersection");

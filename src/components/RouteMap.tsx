@@ -13,7 +13,8 @@ function Fit({ coords }: { coords: LonLat[] }) {
   useEffect(() => {
     if (coords.length < 2) return;
     const bounds = L.latLngBounds(coords.map((c) => [c[1], c[0]] as [number, number]));
-    map.fitBounds(bounds, { padding: [28, 28] });
+    // No animation: leaving the screen mid-zoom made Leaflet throw (_leaflet_pos).
+    map.fitBounds(bounds, { padding: [28, 28], animate: false });
   }, [coords, map]);
   return null;
 }

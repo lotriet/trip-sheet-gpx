@@ -1,7 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -9,16 +9,19 @@ import { EXAMPLE_SHEET_TEXT } from "@/lib/exampleSheet";
 import { buildDayGpx, runFileName, type DeadheadLeg } from "@/lib/dayPlan";
 import { driveBetween } from "@/lib/engine/drive";
 import { buildGpx } from "@/lib/engine/gpx";
-import { parseSheet } from "@/lib/engine/parseSheet";
+import { classifyLocation, parseSheet } from "@/lib/engine/parseSheet";
 import { routeSheet } from "@/lib/engine/route";
 import type { LonLat, Maneuver, ManeuverKind, RouteOverrides, RouteSuccess, Sheet, TurnaroundPin } from "@/lib/engine/types";
-import { loadCorridor, loadMap, type MapData } from "@/lib/mapfetch";
+import { loadAround, loadCorridor, loadMap, lookupName, mergeMaps, type MapData } from "@/lib/mapfetch";
+import { canonicalKey, looksLikePlace, schoolSig } from "@/lib/engine/names";
+import { matchPlace } from "@/lib/engine/route";
 import { readSheetPhotos } from "@/lib/ocr";
+import { osrmRouter } from "@/lib/osrm";
 import { RETAKE_MESSAGE } from "@/lib/ocr/quality";
 import { loadDay, saveDay, type SavedRun } from "@/lib/storage";
-import { autoGroup, buildTrips, describePage, gpxFileName, mergeIntoDay, newTripKey, sortStopsByTime, splitRuns, type PageInfo, type PageRead, type Trip } from "@/lib/batch";
+import { autoGroup, buildTrips, describePage, dropDuplicatePages, gpxFileName, mergeIntoDay, newTripKey, sortStopsByTime, splitRuns, type PageInfo, type PageRead, type Trip } from "@/lib/batch";
 import { canShareFiles, shareOrDownload } from "@/lib/shareFiles";
-import { buildStreetIndex, checkStop, checkStreet, suggestFor as suggestNames, suggestStreets } from "@/lib/streetCheck";
+import { buildStreetIndex, checkStop, checkStreet, looseName, sheetStyle, suggestFor as suggestNames } from "@/lib/streetCheck";
 
 const RouteMap = dynamic(() => import("@/components/RouteMap"), {
   ssr: false,
@@ -95,21 +98,159 @@ export function TripApp() {
   const [pageKeys, setPageKeys] = useState<string[]>([]);
   const [fixing, setFixing] = useState(false);
   const [tripStates, setTripStates] = useState<Record<string, TripState>>({});
+  // A trip opened from the review list, and the fixes made to trips before building.
+  const [reviewKey, setReviewKey] = useState<string | null>(null);
+  const [tripEdits, setTripEdits] = useState<Record<string, { text: string; sheet: Sheet; map?: MapData }>>({});
+  const [bigThumb, setBigThumb] = useState<string | null>(null);
+  const movePanel = useRef<HTMLDivElement>(null);
   // Server render says "Download all"; the phone switches to "Share all" if it can.
   const canShare = useSyncExternalStore(noSubscribe, canShareFiles, () => false);
   const trips = useMemo(() => buildTrips(pages, pageKeys), [pages, pageKeys]);
   // Street names in the form, checked against the map around the stops.
   const [checking, setChecking] = useState(false);
+  const [checkFailed, setCheckFailed] = useState(false);
   const [suggestFor, setSuggestFor] = useState<string | null>(null);
   const streetIndex = useMemo(
     () => (mapData && loadedArea === area ? buildStreetIndex(mapData.lines.filter((l) => l.kind === "named"), mapData.places) : null),
     [mapData, loadedArea, area],
   );
   const hasStops = sheet.stops.length > 0;
+  // Fresh lookups of names the loaded map doesn't have, keyed by the typed text.
+  const [lookups, setLookups] = useState<Record<string, { state: "looking" | "found" | "none"; name?: string }>>({});
+  const [recheckTick, setRecheckTick] = useState(0);
+  const [undo, setUndo] = useState<{ stop: Sheet["stops"][number]; at: number } | null>(null);
+  const lookKey = (raw: string) => raw.trim().toLowerCase().replace(/\s+/g, " ");
+  const runCenter = useMemo(() => {
+    if (!mapData) return null;
+    const pts = mapData.lines.filter((l) => l.kind === "named").map((l) => l.coords[0]);
+    if (!pts.length) return null;
+    const lats = pts.map((p) => p[1]).sort((a, b) => a - b);
+    const lons = pts.map((p) => p[0]).sort((a, b) => a - b);
+    return { lat: lats[Math.floor(lats.length / 2)], lon: lons[Math.floor(lons.length / 2)] };
+  }, [mapData]);
+
+  /** Is one name (a street or a school) on the loaded map? */
+  function nameOnMap(raw: string): boolean {
+    if (!streetIndex || !raw.trim()) return false;
+    if (looksLikePlace(raw)) return !!matchPlace(raw, streetIndex.places);
+    return checkStreet(streetIndex, raw) === "found";
+  }
+
+  type FieldState = { state: string; missing: string[]; label?: string };
+
+  function streetState(raw: string): FieldState {
+    if (!raw.trim()) return { state: "unknown", missing: [] };
+    if (!streetIndex) return { state: checking ? "checking" : "unknown", missing: [] };
+    if (nameOnMap(raw)) {
+      const place = looksLikePlace(raw) ? matchPlace(raw, streetIndex.places) : null;
+      return { state: "found", missing: [], label: place?.name ?? looseName(streetIndex, raw) ?? undefined };
+    }
+    const lk = lookups[lookKey(raw)];
+    return { state: lk?.state === "looking" ? "looking" : "missing", missing: [raw] };
+  }
+
+  function stopState(description: string): FieldState {
+    if (!description.trim()) return { state: "unknown", missing: [] };
+    if (!streetIndex) return { state: checking ? "checking" : "unknown", missing: [] };
+    const check = checkStop(streetIndex, description);
+    if (check.status === "empty") return { state: "unknown", missing: [] };
+    if (check.status === "found") {
+      const loc = classifyLocation(description);
+      const place = loc.kind === "school" ? matchPlace(loc.name, streetIndex.places) : null;
+      return { state: "found", missing: [], label: place?.name };
+    }
+    const looking = check.missing.some((m) => lookups[lookKey(m)]?.state === "looking");
+    return { state: looking ? "looking" : "missing", missing: check.missing };
+  }
+
+  /** Close matches for a missing name: what the fresh lookup found, then names on the map near the run. */
+  function optionsFor(part: string): string[] {
+    const lk = lookups[lookKey(part)];
+    const out: string[] = [];
+    if (lk?.state === "found" && lk.name) {
+      const styled = looksLikePlace(part) ? sheetStyle(lk.name) : sheetStyle(lk.name);
+      if (canonicalKey(styled) !== canonicalKey(part)) out.push(styled);
+    }
+    for (const n of streetIndex ? suggestNames(streetIndex, part) : []) if (!out.includes(n)) out.push(n);
+    return out.slice(0, 5);
+  }
+
+  /**
+   * Look names up again right now, near this run: the built-in school list,
+   * then the geocoder. A hit adds the map around it, so the field turns green
+   * and the route builder can use it.
+   */
+  async function resolveNames(parts: string[], force = false) {
+    const todo = [...new Set(parts.filter((p) => p.trim()))].filter((p) => force || !lookups[lookKey(p)]);
+    if (!todo.length || !runCenter) return;
+    setLookups((prev) => ({ ...prev, ...Object.fromEntries(todo.map((p) => [lookKey(p), { state: "looking" as const }])) }));
+    for (const part of todo) {
+      let result: { state: "found" | "none"; name?: string } = { state: "none" };
+      try {
+        const hit = await lookupName(part, runCenter);
+        if (hit) {
+          const extra = await loadAround({ lat: hit.lat, lon: hit.lon });
+          const places = hit.place && !extra.places.some((p) => p.name === hit.name) ? [{ name: hit.name, lat: hit.lat, lon: hit.lon, ...schoolSig(hit.name) }] : [];
+          setMapData((prev) => (prev ? mergeMaps(prev, { lines: extra.lines, places: [...extra.places, ...places] }) : prev));
+          result = { state: "found", name: hit.name };
+        }
+      } catch {
+        result = { state: "none" };
+      }
+      setLookups((prev) => ({ ...prev, [lookKey(part)]: result }));
+    }
+  }
+
+  function tapMark(id: string, parts: string[]) {
+    const open = suggestFor !== id;
+    setSuggestFor(open ? id : null);
+    if (open && parts.length) void resolveNames(parts, true);
+  }
+
+  function recheckSoon() {
+    setRecheckTick((t) => t + 1);
+  }
+
+  function deleteStop(si: number) {
+    const stop = sheet.stops[si];
+    setSheet({ ...sheet, stops: sheet.stops.filter((_, i) => i !== si) });
+    setSuggestFor(null);
+    setUndo({ stop, at: si });
+  }
+
+  function undoDelete() {
+    if (!undo) return;
+    const stops = sheet.stops.slice();
+    stops.splice(Math.min(undo.at, stops.length), 0, undo.stop);
+    setSheet({ ...sheet, stops });
+    setUndo(null);
+  }
+
+  useEffect(() => {
+    if (!undo) return;
+    const t = setTimeout(() => setUndo(null), 10000);
+    return () => clearTimeout(t);
+  }, [undo]);
+
+  useEffect(() => {
+    // After typing settles (or a field loses focus), look up names the map doesn't have.
+    if (view !== "edit" || !streetIndex || !runCenter) return;
+    const timer = setTimeout(() => {
+      const missing: string[] = [];
+      for (const stop of sheet.stops) {
+        missing.push(...stopState(stop.description).missing);
+        for (const m of stop.maneuvers) missing.push(...streetState(m.street).missing);
+      }
+      void resolveNames(missing.slice(0, 12));
+    }, 900);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sheet, streetIndex, runCenter, view, recheckTick]);
+  const reviewTrip = reviewKey ? (trips.find((t) => t.key === reviewKey) ?? null) : null;
 
   useEffect(() => {
     // Load the map quietly once the form has stops, after typing settles.
-    if (view !== "edit" || !hasStops || streetIndex || status) return;
+    if (view !== "edit" || !hasStops || streetIndex || status || checkFailed) return;
     let cancelled = false;
     const timer = setTimeout(() => {
       setChecking(true);
@@ -120,7 +261,8 @@ export function TripApp() {
           setLoadedArea(area);
         })
         .catch(() => {
-          /* no check marks without a connection; building still works later */
+          // No check marks without the map; say so, so the driver can try again.
+          if (!cancelled) setCheckFailed(true);
         })
         .finally(() => {
           if (!cancelled) setChecking(false);
@@ -132,7 +274,7 @@ export function TripApp() {
     };
     // The sheet is read when the timer fires; re-running on every edit would reload the map.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [view, hasStops, streetIndex, status, area]);
+  }, [view, hasStops, streetIndex, status, area, checkFailed]);
 
 
   useEffect(() => {
@@ -178,16 +320,22 @@ export function TripApp() {
 
   /** Text from photos or a paste: one run goes to the editor, several to the review list. */
   function takeText(reads: PageRead[], note = ""): boolean {
-    const read = reads.flatMap((r) => splitRuns(r.text).map((text) => ({ ...r, text }))).map(describePage);
+    const all = reads.flatMap((r) => splitRuns(r.text).map((text) => ({ ...r, text }))).map(describePage);
+    const { pages: read, dropped } = dropDuplicatePages(all);
+    const dupNote = dropped.length
+      ? `Photo ${[...new Set(dropped.map((p) => p.photo + 1))].join(", ")} is the same page as another photo, so it was used once.`
+      : "";
     const keys = autoGroup(read);
     const found = buildTrips(read, keys);
     if (found.length > 1) {
       setPages(read);
       setPageKeys(keys);
       setTripStates({});
+      setTripEdits({});
+      setReviewKey(null);
       setFixing(false);
       setView("review");
-      setError(note);
+      setError([note, dupNote].filter(Boolean).join(" "));
       return true;
     }
     return false;
@@ -223,7 +371,7 @@ export function TripApp() {
       return;
     }
     setStatus("");
-    const good = results.flatMap((r, i) => (r.ok ? [{ photo: i, name: r.name, text: r.text }] : []));
+    const good = results.flatMap((r, i) => (r.ok ? [{ photo: i, name: r.name, text: r.text, thumb: r.thumb }] : []));
     const bad = results.flatMap((r, i) => (r.ok ? [] : [{ photo: i, reason: r.reason }]));
     const badNote = bad.length
       ? results.length === 1
@@ -242,11 +390,18 @@ export function TripApp() {
 
   function movePage(page: PageInfo, key: string) {
     const at = pages.indexOf(page);
-    setPageKeys((prev) => {
-      const target = key === "new" ? newTripKey(prev) : key;
-      return prev.map((k, i) => (i === at ? target : k));
+    const from = pageKeys[at];
+    const target = key === "new" ? newTripKey(pageKeys) : key;
+    setPageKeys(pageKeys.map((k, i) => (i === at ? target : k)));
+    // Both trips change, so fixes typed into either are read again from the pages.
+    setTripEdits((prev) => {
+      const next = { ...prev };
+      delete next[from];
+      delete next[target];
+      return next;
     });
     setTripStates({});
+    if (reviewKey === from) setReviewKey(null);
   }
 
   function savedRunFrom(id: string, sheetText: string, built: Sheet, result: RouteSuccess): SavedRun {
@@ -278,11 +433,14 @@ export function TripApp() {
       setTripStates({ ...tripStates, ...states });
       setStatus(`${prefix}: building…`);
       try {
-        if (!trip.stops) throw new Error("No stops were read from these photos.");
-        const data = await cachedMap(trip.sheet, area, (s) => setStatus(`${prefix}: ${s}`));
-        const result = routeSheet(trip.sheet, data);
+        const edit = tripEdits[trip.key];
+        const tripSheet = edit?.sheet ?? trip.sheet;
+        if (!tripSheet.stops.length) throw new Error("No stops were read from these photos.");
+        // A trip opened and fixed keeps the map it was checked on, with any names looked up.
+        const data = edit?.map ?? (await cachedMap(tripSheet, area, (s) => setStatus(`${prefix}: ${s}`)));
+        const result = await routeSheet(tripSheet, data, {}, osrmRouter);
         if (!result.ok) throw new Error(result.error);
-        added.push(savedRunFrom(newId(), trip.text, trip.sheet, result));
+        added.push(savedRunFrom(newId(), edit ? prettyText(tripSheet) : trip.text, tripSheet, result));
         states[trip.key] = { state: "added" };
       } catch (err) {
         failed++;
@@ -295,21 +453,40 @@ export function TripApp() {
     if (!failed) {
       setPages([]);
       setPageKeys([]);
+      setTripEdits({});
+      setReviewKey(null);
       setView("day");
     } else {
       setError(`${failed} trip${failed > 1 ? "s" : ""} couldn't be built. Open ${failed > 1 ? "them" : "it"} to fix the directions.`);
     }
   }
 
+  /** Open one trip's stops and directions from the review list, before or after building. */
   function openTrip(trip: Trip) {
+    const edit = tripEdits[trip.key];
     setEditingId(null);
-    setText(trip.text);
-    setSheet(trip.sheet);
+    setReviewKey(trip.key);
+    setSuggestFor(null);
+    setLookups({});
+    setUndo(null);
+    setText(edit?.text ?? trip.text);
+    setSheet(edit?.sheet ?? trip.sheet);
     setRoute(null);
-    setMapData(null);
+    setMapData(edit?.map ?? null);
+    if (edit?.map) setLoadedArea(area);
     setOverrides({});
     setError("");
     setView("edit");
+    window.scrollTo(0, 0);
+  }
+
+  /** Keep the fixes made to an opened trip and go back to the list. */
+  function backToTrips() {
+    if (reviewKey) setTripEdits((prev) => ({ ...prev, [reviewKey]: { text, sheet, map: mapData && loadedArea === area ? mapData : undefined } }));
+    setReviewKey(null);
+    setRoute(null);
+    setView("review");
+    window.scrollTo(0, 0);
   }
 
   function updateManeuver(si: number, mi: number, patch: Partial<Maneuver>) {
@@ -344,7 +521,7 @@ export function TripApp() {
       setMapData(data);
       setLoadedArea(area);
       setStatus("Following the printed streets…");
-      const result = routeSheet(current, data, nextOverrides);
+      const result = await routeSheet(current, data, nextOverrides, osrmRouter);
       if (!result.ok) {
         setError(result.error);
         setStatus("");
@@ -376,6 +553,17 @@ export function TripApp() {
   function saveToDay() {
     if (!route) return;
     const saved = savedRunFrom(editingId ?? newId(), text, sheet, route);
+    if (reviewKey) {
+      // Built from the review list: add it to the day by time and go back to the other trips.
+      const key = reviewKey;
+      const states = { ...tripStates, [key]: { state: "added" as const } };
+      setRuns((prev) => mergeIntoDay(prev, [saved]));
+      setTripStates(states);
+      setTripEdits((prev) => ({ ...prev, [key]: { text, sheet } }));
+      setReviewKey(null);
+      setView(trips.every((t) => states[t.key]?.state === "added") ? "day" : "review");
+      return;
+    }
     setRuns((prev) => {
       const idx = prev.findIndex((r) => r.id === saved.id);
       if (idx === -1) return [...prev, saved];
@@ -525,73 +713,121 @@ export function TripApp() {
           <p className="text-lg font-semibold">
             {trips.length} trips found. Check them, then build.
           </p>
+          <p className="-mt-2 text-sm text-[#3d4b63]">Tap a trip to see its stops and directions.</p>
           <ul className="space-y-2">
             {trips.map((trip) => {
               const st = tripStates[trip.key];
+              const edited = !!tripEdits[trip.key];
+              const shown = tripEdits[trip.key]?.sheet;
+              const stops = shown ? shown.stops.length : trip.stops;
+              const turns = shown ? shown.stops.reduce((n, x) => n + x.maneuvers.length, 0) : trip.turns;
               return (
-                <li key={trip.key} className="rounded-xl bg-white p-3 ring-1 ring-[#d9d2c3]" data-trip={trip.run || trip.key}>
-                  <div className="flex items-baseline justify-between gap-2">
-                    <p className="text-lg font-semibold">Run {trip.run || "?"}</p>
-                    <p className="text-base">{trip.firstTime || "no time"}</p>
-                  </div>
-                  <p className="text-sm text-[#3d4b63]">
-                    {trip.stops} stops · {trip.turns} turns · {trip.pages.length === 1 ? "1 page" : `${trip.pages.length} pages`}
-                    {st?.state === "building" ? " · building…" : st?.state === "added" ? " · added" : ""}
-                  </p>
-                  {st?.state === "failed" && (
-                    <div className="mt-2 flex items-center justify-between gap-2 text-sm text-[#7f1d1d]">
-                      <span>{st.message}</span>
-                      <Button type="button" variant="outline" className="h-10" onClick={() => openTrip(trip)}>
-                        Open
-                      </Button>
-                    </div>
-                  )}
-                  {fixing &&
-                    trip.pages.map((p) => (
-                      <label key={pages.indexOf(p)} className="mt-2 flex items-center justify-between gap-2 text-sm">
-                        {p.photo < 0 ? p.name : `Photo ${p.photo + 1}`}
-                        {p.first != null ? ` · ${p.text.match(/\d{1,2}\s?:\s?\d{2}\s*[AP]\.?M/i)?.[0] ?? ""}` : ""}
-                        <select
-                          className="h-10 rounded-lg border border-[#d9d2c3] bg-white px-2"
-                          value={trip.key}
-                          onChange={(e) => movePage(p, e.target.value)}
-                        >
-                          {trips.map((t) => (
-                            <option key={t.key} value={t.key}>
-                              Run {t.run || "?"}
-                            </option>
-                          ))}
-                          <option value="new">New trip</option>
-                        </select>
-                      </label>
-                    ))}
+                <li key={trip.key} data-trip={trip.run || trip.key}>
+                  <button
+                    type="button"
+                    className="block w-full touch-manipulation rounded-xl bg-white p-3 text-left ring-1 ring-[#d9d2c3] active:bg-[#eef2f7]"
+                    onClick={() => openTrip(trip)}
+                  >
+                    <span className="flex items-baseline justify-between gap-2">
+                      <span className="text-lg font-semibold">Run {trip.run || "?"}</span>
+                      <span className="text-base">{trip.firstTime || "no time"} ›</span>
+                    </span>
+                    <span className="block text-sm text-[#3d4b63]">
+                      {stops} stops · {turns} turns · {trip.pages.length === 1 ? "1 page" : `${trip.pages.length} pages`}
+                      {edited ? " · fixed" : ""}
+                      {st?.state === "building" ? " · building…" : st?.state === "added" ? " · added" : ""}
+                    </span>
+                    <PageThumbs pages={trip.pages} />
+                    {st?.state === "failed" && <span className="mt-2 block text-sm text-[#7f1d1d]">{st.message} Tap to fix it.</span>}
+                  </button>
                 </li>
               );
             })}
           </ul>
-          <Button type="button" variant="outline" className="h-11" onClick={() => setFixing(!fixing)}>
+          <button
+            type="button"
+            className="h-11 touch-manipulation rounded-lg border border-[#d9d2c3] bg-white text-sm font-medium"
+            aria-expanded={fixing}
+            onClick={() => {
+              const open = !fixing;
+              setFixing(open);
+              if (open) setTimeout(() => movePanel.current?.scrollIntoView({ block: "start", behavior: "smooth" }), 50);
+            }}
+          >
             {fixing ? "Done moving photos" : "A photo is in the wrong trip"}
-          </Button>
+          </button>
+          {fixing && (
+            <div ref={movePanel} className="scroll-mt-4 space-y-2 rounded-xl bg-white p-3 ring-1 ring-[#d9d2c3]" data-move-panel>
+              <p className="text-sm">Pick the trip each photo belongs to.</p>
+              {pages.map((p, i) => (
+                <div key={i} className="flex items-center gap-2" data-move-page={i}>
+                  {p.thumb ? (
+                    <button type="button" className="shrink-0" aria-label="Show this photo bigger" onClick={() => setBigThumb(p.thumb ?? null)}>
+                      <img src={p.thumb} alt="" className="h-16 w-12 rounded object-cover object-top ring-1 ring-[#d9d2c3]" />
+                    </button>
+                  ) : null}
+                  <span className="min-w-0 flex-1 text-sm">
+                    {p.photo < 0 ? p.name : `Photo ${p.photo + 1}`}
+                    <span className="block text-[#3d4b63]">{pageTimes(p)}</span>
+                  </span>
+                  <select
+                    className="h-11 rounded-lg border border-[#d9d2c3] bg-white px-2 text-base"
+                    aria-label={`Trip for ${p.photo < 0 ? p.name : `photo ${p.photo + 1}`}`}
+                    value={pageKeys[i]}
+                    onChange={(e) => movePage(p, e.target.value)}
+                  >
+                    {trips.map((t) => (
+                      <option key={t.key} value={t.key}>
+                        Run {t.run || "?"}
+                      </option>
+                    ))}
+                    <option value="new">New trip</option>
+                  </select>
+                </div>
+              ))}
+            </div>
+          )}
           <div className="fixed inset-x-0 bottom-0 border-t border-[#d9d2c3] bg-[#f6f3ea] p-3">
             <div className="mx-auto flex max-w-lg gap-2">
               <Button type="button" variant="outline" className="h-12 flex-1" onClick={() => setView("edit")}>
                 Back
               </Button>
               <Button type="button" className="h-12 flex-[2] bg-[#0f2744] text-base text-white" disabled={!!status} onClick={() => void buildAllTrips()}>
-                Build {trips.length} trips
+                Build {trips.filter((t) => tripStates[t.key]?.state !== "added").length} trips
               </Button>
             </div>
           </div>
         </section>
       )}
 
+      {bigThumb && (
+        <button type="button" className="fixed inset-0 z-50 flex items-start justify-center overflow-auto bg-black/80 p-2" aria-label="Close the photo" onClick={() => setBigThumb(null)}>
+          <img src={bigThumb} alt="The page as it was read" className="w-full max-w-lg rounded" />
+        </button>
+      )}
+
       {view === "edit" && (
         <section className="flex flex-col gap-3 px-4 py-4 pb-36">
+          {reviewTrip && (
+            <div className="rounded-xl bg-white p-3 ring-1 ring-[#d9d2c3]" data-trip-open={reviewTrip.run || reviewTrip.key}>
+              <p className="text-lg font-semibold">
+                Run {reviewTrip.run || "?"} · {reviewTrip.pages.length === 1 ? "1 page" : `${reviewTrip.pages.length} pages`}
+              </p>
+              <p className="text-sm text-[#3d4b63]">Check the streets: a red ? means the map doesn’t know that name. Tap it for close matches.</p>
+              <PageThumbs pages={reviewTrip.pages} onOpen={setBigThumb} />
+            </div>
+          )}
+          <Tucked away={!!reviewTrip}>
           <label className="text-sm font-medium">
             Area
             <Input className="mt-1 h-12 bg-white text-base" value={area} onChange={(e) => setArea(e.target.value)} />
           </label>
-          <div className="grid grid-cols-2 gap-2">
+          {!reviewTrip && pages.length > 0 && trips.length > 1 && (
+            <Button type="button" variant="outline" className="h-11" onClick={() => setView("review")}>
+              Back to the {trips.length} trips found
+            </Button>
+          )}
+          {!reviewTrip && <div className="grid grid-cols-2 gap-2">
             <label className="flex h-12 cursor-pointer items-center justify-center rounded-lg bg-[#0f2744] text-sm font-medium text-white">
               Take photos
               <input className="sr-only" type="file" accept="image/*,.heic,.heif" capture="environment" multiple onChange={(e) => void onPhotos(e.currentTarget)} />
@@ -600,7 +836,7 @@ export function TripApp() {
               Choose photos
               <input className="sr-only" type="file" accept="image/*,.heic,.heif" multiple onChange={(e) => void onPhotos(e.currentTarget)} />
             </label>
-          </div>
+          </div>}
           <label className="text-sm font-medium">
             Sheet text
             <Textarea className="mt-1 min-h-36 bg-white font-mono text-sm" value={text} onChange={(e) => setText(e.target.value)} placeholder="Paste the trip sheet, or it will fill in from the photos." />
@@ -609,10 +845,21 @@ export function TripApp() {
             <Button type="button" variant="outline" className="h-11 flex-1" onClick={readPasted}>
               Read the text
             </Button>
-            <Button type="button" variant="outline" className="h-11 flex-1" onClick={() => applyText(EXAMPLE_SHEET_TEXT)}>
-              Load a fake example
-            </Button>
+            {!reviewTrip && (
+              <Button type="button" variant="outline" className="h-11 flex-1" onClick={() => applyText(EXAMPLE_SHEET_TEXT)}>
+                Load a fake example
+              </Button>
+            )}
           </div>
+          </Tucked>
+          {checkFailed && !streetIndex && sheet.stops.length > 0 && (
+            <p className="flex items-center justify-between gap-2 rounded-lg bg-[#ffedd5] px-3 py-2 text-sm">
+              Couldn’t check the street names right now.
+              <Button type="button" variant="outline" className="h-10" onClick={() => setCheckFailed(false)}>
+                Try again
+              </Button>
+            </p>
+          )}
           {sheet.stops.length > 0 && (
             <div className="space-y-3">
               <div className="grid grid-cols-2 gap-2">
@@ -620,125 +867,122 @@ export function TripApp() {
                 <Input className="h-11 bg-white text-base" value={sheet.run} placeholder="Run" onChange={(e) => setSheet({ ...sheet, run: e.target.value })} />
                 <Input className="col-span-2 h-11 bg-white text-base" value={sheet.description} placeholder="Description" onChange={(e) => setSheet({ ...sheet, description: e.target.value })} />
               </div>
-              {sheet.stops.map((stop, si) => (
-                <div key={si} className="rounded-xl bg-white p-3 ring-1 ring-[#d9d2c3]">
-                  <div className="flex flex-wrap gap-2">
-                    <Input className="h-11 w-28 bg-white text-base" value={stop.time} onChange={(e) => setSheet({ ...sheet, stops: sheet.stops.map((s, i) => (i === si ? { ...s, time: e.target.value } : s)) })} />
-                    <Input className="h-11 min-w-0 flex-1 bg-white text-base" value={stop.description} onChange={(e) => setSheet({ ...sheet, stops: sheet.stops.map((s, i) => (i === si ? { ...s, description: e.target.value } : s)) })} />
-                    {(() => {
-                      const check = streetIndex ? checkStop(streetIndex, stop.description) : null;
-                      const id = `stop-${si}`;
-                      return (
-                        <>
-                          <StreetMark
-                            state={checking && !streetIndex ? "checking" : check ? check.status : "unknown"}
-                            open={suggestFor === id}
-                            onTap={() => setSuggestFor(suggestFor === id ? null : id)}
-                          />
-                          {suggestFor === id && streetIndex && check && (
-                            <div className="w-full rounded-lg bg-[#fef2f2] p-2">
-                              {check.missing.map((part) => {
-                                const options = suggestNames(streetIndex, part);
-                                return (
-                                  <div key={part} className="mb-1">
-                                    <p className="text-sm">{part} is not on the map near these stops.{options.length ? " Did you mean:" : " Type it from the sheet."}</p>
-                                    <div className="mt-1 flex flex-col gap-1">
-                                      {options.map((name) => (
-                                        <Button
-                                          key={name}
-                                          type="button"
-                                          variant="outline"
-                                          className="h-11 justify-start bg-white text-base"
-                                          onClick={() => {
-                                            setSheet({
-                                              ...sheet,
-                                              stops: sheet.stops.map((s, i) => (i === si ? { ...s, description: s.description.replace(part, name) } : s)),
-                                            });
-                                            setSuggestFor(null);
-                                          }}
-                                        >
-                                          {name}
-                                        </Button>
-                                      ))}
-                                    </div>
-                                  </div>
-                                );
-                              })}
-                            </div>
-                          )}
-                        </>
-                      );
-                    })()}
-                  </div>
-                  <ul className="mt-2 space-y-2">
-                    {stop.maneuvers.map((m, mi) => (
-                      <li key={mi} className="flex flex-wrap gap-2">
-                        <select
-                          className="h-11 rounded-lg border border-[#d9d2c3] bg-white px-2 text-sm"
-                          value={m.kind}
-                          onChange={(e) => updateManeuver(si, mi, { kind: e.target.value as ManeuverKind })}
-                        >
-                          {KINDS.map((k) => (
-                            <option key={k} value={k}>
-                              {KIND_LABEL[k]}
-                            </option>
-                          ))}
-                        </select>
-                        <Input className="h-11 min-w-0 flex-1 bg-white text-base" value={m.street} onChange={(e) => updateManeuver(si, mi, { street: e.target.value })} />
-                        <StreetMark
-                          state={checking && !streetIndex ? "checking" : streetIndex ? checkStreet(streetIndex, m.street) : "unknown"}
-                          open={suggestFor === `${si}-${mi}`}
-                          onTap={() => setSuggestFor(suggestFor === `${si}-${mi}` ? null : `${si}-${mi}`)}
+              {sheet.stops.map((stop, si) => {
+                const stopCheck = stopState(stop.description);
+                const sid = `stop-${si}`;
+                return (
+                  <div key={si} className="rounded-xl bg-white p-3 ring-1 ring-[#d9d2c3]" data-stop={si}>
+                    <div className="flex flex-wrap gap-2">
+                      <Input className="h-11 w-28 bg-white text-base" value={stop.time} aria-label="Stop time" onChange={(e) => setSheet({ ...sheet, stops: sheet.stops.map((s, i) => (i === si ? { ...s, time: e.target.value } : s)) })} />
+                      <Input
+                        className="h-11 min-w-0 flex-1 bg-white text-base"
+                        value={stop.description}
+                        aria-label="Stop place"
+                        onChange={(e) => setSheet({ ...sheet, stops: sheet.stops.map((s, i) => (i === si ? { ...s, description: e.target.value } : s)) })}
+                        onBlur={() => void recheckSoon()}
+                      />
+                      <StreetMark state={stopCheck.state} open={suggestFor === sid} onTap={() => void tapMark(sid, stopCheck.missing)} />
+                      <button
+                        type="button"
+                        className="h-11 w-11 touch-manipulation rounded-lg border border-[#d9d2c3] bg-white text-base text-[#7f1d1d]"
+                        aria-label={`Delete stop ${si + 1}`}
+                        onClick={() => deleteStop(si)}
+                      >
+                        🗑
+                      </button>
+                      {stopCheck.label && <p className="w-full text-xs text-[#15803d]">On the map: {stopCheck.label}</p>}
+                      {suggestFor === sid && (
+                        <SuggestPanel
+                          names={stopCheck.missing}
+                          looking={stopCheck.state === "looking"}
+                          suggest={optionsFor}
+                          onPick={(part, name) => {
+                            setSheet({
+                              ...sheet,
+                              stops: sheet.stops.map((s, i) => (i === si ? { ...s, description: s.description.replace(part, name) } : s)),
+                            });
+                            setSuggestFor(null);
+                          }}
                         />
-                        <Button type="button" variant="outline" className="h-11" onClick={() => setSheet({ ...sheet, stops: sheet.stops.map((s, i) => (i === si ? { ...s, maneuvers: s.maneuvers.filter((_, j) => j !== mi) } : s)) })}>
-                          ✕
-                        </Button>
-                        {suggestFor === `${si}-${mi}` && streetIndex && (
-                          <div className="w-full rounded-lg bg-[#fef2f2] p-2">
-                            <p className="text-sm">Not found near these stops. Did you mean:</p>
-                            <div className="mt-1 flex flex-col gap-1">
-                              {suggestStreets(streetIndex, m.street).map((name) => (
-                                <Button
-                                  key={name}
-                                  type="button"
-                                  variant="outline"
-                                  className="h-11 justify-start bg-white text-base"
-                                  onClick={() => {
-                                    updateManeuver(si, mi, { street: name });
-                                    setSuggestFor(null);
-                                  }}
-                                >
-                                  {name}
-                                </Button>
+                      )}
+                    </div>
+                    <ul className="mt-2 space-y-2">
+                      {stop.maneuvers.map((m, mi) => {
+                        const st = streetState(m.street);
+                        const mid = `${si}-${mi}`;
+                        return (
+                          <li key={mi} className="flex flex-wrap gap-2">
+                            <select
+                              className="h-11 rounded-lg border border-[#d9d2c3] bg-white px-2 text-sm"
+                              value={m.kind}
+                              aria-label="Direction"
+                              onChange={(e) => updateManeuver(si, mi, { kind: e.target.value as ManeuverKind })}
+                            >
+                              {KINDS.map((k) => (
+                                <option key={k} value={k}>
+                                  {KIND_LABEL[k]}
+                                </option>
                               ))}
-                              {!suggestStreets(streetIndex, m.street).length && <p className="text-sm">No close match. Type the name from the sheet.</p>}
-                            </div>
-                          </div>
-                        )}
-                      </li>
-                    ))}
-                  </ul>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    className="mt-2 h-10"
-                    onClick={() =>
-                      setSheet({
-                        ...sheet,
-                        stops: sheet.stops.map((s, i) => (i === si ? { ...s, maneuvers: [...s.maneuvers, { kind: "right", street: "" }] } : s)),
-                      })
-                    }
-                  >
-                    Add a direction
-                  </Button>
-                </div>
-              ))}
+                            </select>
+                            <Input
+                              className="h-11 min-w-0 flex-1 bg-white text-base"
+                              value={m.street}
+                              aria-label="Street"
+                              onChange={(e) => updateManeuver(si, mi, { street: e.target.value })}
+                              onBlur={() => void recheckSoon()}
+                            />
+                            <StreetMark state={st.state} open={suggestFor === mid} onTap={() => void tapMark(mid, st.state === "found" ? [] : [m.street])} />
+                            <Button type="button" variant="outline" className="h-11" aria-label="Delete this direction" onClick={() => setSheet({ ...sheet, stops: sheet.stops.map((s, i) => (i === si ? { ...s, maneuvers: s.maneuvers.filter((_, j) => j !== mi) } : s)) })}>
+                              ✕
+                            </Button>
+                            {st.label && <p className="w-full text-xs text-[#15803d]">On the map: {st.label}</p>}
+                            {suggestFor === mid && (
+                              <SuggestPanel
+                                names={st.state === "found" ? [] : [m.street]}
+                                looking={st.state === "looking"}
+                                suggest={optionsFor}
+                                onPick={(_, name) => {
+                                  updateManeuver(si, mi, { street: name });
+                                  setSuggestFor(null);
+                                }}
+                              />
+                            )}
+                          </li>
+                        );
+                      })}
+                    </ul>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="mt-2 h-10"
+                      onClick={() =>
+                        setSheet({
+                          ...sheet,
+                          stops: sheet.stops.map((s, i) => (i === si ? { ...s, maneuvers: [...s.maneuvers, { kind: "right", street: "" }] } : s)),
+                        })
+                      }
+                    >
+                      Add a direction
+                    </Button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+          {undo && (
+            <div className="fixed inset-x-0 bottom-20 z-40 px-3" role="status">
+              <div className="mx-auto flex max-w-lg items-center justify-between gap-2 rounded-lg bg-[#142033] px-3 py-2 text-sm text-white shadow-lg">
+                <span>Stop deleted.</span>
+                <button type="button" className="h-10 rounded-md bg-[#f5c451] px-4 font-semibold text-[#142033]" onClick={undoDelete}>
+                  Undo
+                </button>
+              </div>
             </div>
           )}
           <div className="fixed inset-x-0 bottom-0 border-t border-[#d9d2c3] bg-[#f6f3ea] p-3">
             <div className="mx-auto flex max-w-lg gap-2">
-              <Button type="button" variant="outline" className="h-12 flex-1" onClick={() => setView("day")}>
-                Back
+              <Button type="button" variant="outline" className="h-12 flex-1" onClick={() => (reviewTrip ? backToTrips() : setView("day"))}>
+                {reviewTrip ? "Back to trips" : "Back"}
               </Button>
               <Button type="button" className="h-12 flex-[2] bg-[#0f2744] text-base text-white" disabled={(!sheet.stops.length && !text.trim()) || !!status} onClick={() => void generate()}>
                 Build the route
@@ -858,6 +1102,87 @@ function prettyText(sheet: Sheet): string {
   return head.join("\n");
 }
 
+/** In a trip opened from the review list the stops come first; the raw text folds away. */
+function Tucked({ away, children }: { away: boolean; children: React.ReactNode }) {
+  if (!away) return <>{children}</>;
+  return (
+    <details className="rounded-xl bg-white p-3 ring-1 ring-[#d9d2c3]">
+      <summary className="cursor-pointer text-sm font-medium">Sheet text and area</summary>
+      <div className="mt-2 flex flex-col gap-3">{children}</div>
+    </details>
+  );
+}
+
+function pageTimes(p: PageInfo): string {
+  const t = (m: number | null) => (m == null ? "" : `${((Math.floor(m / 60) + 11) % 12) + 1}:${String(m % 60).padStart(2, "0")} ${m >= 720 ? "PM" : "AM"}`);
+  if (p.first == null) return p.run ? `Run ${p.run}` : "no times";
+  return `${p.run ? `Run ${p.run} · ` : ""}${t(p.first)}${p.last != null && p.last !== p.first ? `–${t(p.last)}` : ""}`;
+}
+
+/** Small pictures of a trip's pages, so a page from another run stands out. */
+function PageThumbs({ pages, onOpen }: { pages: PageInfo[]; onOpen?: (src: string) => void }) {
+  if (!pages.some((p) => p.thumb)) return null;
+  return (
+    <span className="mt-2 flex gap-2">
+      {pages.map((p, i) =>
+        p.thumb ? (
+          onOpen ? (
+            <button key={i} type="button" aria-label={`Show page ${i + 1} bigger`} onClick={() => onOpen(p.thumb as string)}>
+              <img src={p.thumb} alt="" className="h-20 w-16 rounded object-cover object-top ring-1 ring-[#d9d2c3]" />
+            </button>
+          ) : (
+            <img key={i} src={p.thumb} alt="" className="h-20 w-16 rounded object-cover object-top ring-1 ring-[#d9d2c3]" />
+          )
+        ) : null,
+      )}
+    </span>
+  );
+}
+
+function SuggestPanel({
+  names,
+  looking,
+  suggest,
+  onPick,
+}: {
+  names: string[];
+  looking: boolean;
+  suggest: (part: string) => string[];
+  onPick: (part: string, name: string) => void;
+}) {
+  if (!names.length) return null;
+  return (
+    <div className="w-full rounded-lg bg-[#fef2f2] p-2" data-suggest>
+      {names.map((part) => {
+        const options = looking ? [] : suggest(part);
+        return (
+          <div key={part} className="mb-1">
+            <p className="text-sm">
+              {looking
+                ? `Looking up ${part} near this run…`
+                : options.length
+                  ? `${part} isn't on the map near this run. Did you mean:`
+                  : `${part} wasn't found near this run. Type it the way the sheet prints it.`}
+            </p>
+            <div className="mt-1 flex flex-col gap-1">
+              {options.map((name) => (
+                <button
+                  key={name}
+                  type="button"
+                  className="h-11 touch-manipulation rounded-lg border border-[#d9d2c3] bg-white px-3 text-left text-base"
+                  onClick={() => onPick(part, name)}
+                >
+                  {name}
+                </button>
+              ))}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 function StreetMark({ state, open, onTap }: { state: string; open: boolean; onTap: () => void }) {
   if (state === "found") {
     return (
@@ -876,6 +1201,13 @@ function StreetMark({ state, open, onTap }: { state: string; open: boolean; onTa
       >
         ?
       </button>
+    );
+  }
+  if (state === "looking") {
+    return (
+      <span className="flex h-11 w-9 items-center justify-center" aria-label="Looking up the name">
+        <span className="h-5 w-5 animate-spin rounded-full border-2 border-[#d9d2c3] border-t-[#0f2744]" />
+      </span>
     );
   }
   if (state === "checking") {

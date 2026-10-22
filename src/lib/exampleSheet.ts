@@ -1,21 +1,23 @@
 /**
  * A made-up sheet so the editor has something to show.
- * Not a real run. The streets are public roads in downtown Raleigh, so the
- * example builds a real route: a block loop around the east side of downtown.
+ * Not a real run. The streets are public suburban roads in Wake County, so the
+ * example builds a real route, with every turn found on the map.
  */
 export const EXAMPLE_SHEET_TEXT = `Route: DEMO Description: FAKE EXAMPLE OAK ACADEMY Run: 999.001
 
-3:15 PM Deadhead - FAYETTEVILLE ST & HARGETT ST
+7:05 AM Deadhead - CRAVENRIDGE RD & FALKIRK PL
 0 0 000.001
-Proceed On FAYETTEVILLE ST
-Right Turn Onto MORGAN ST
-Right Turn Onto BLOUNT ST
+Proceed On CRAVENRIDGE RD
+Left Turn Onto DUNHAVEN DR
+Left Turn Onto BUFFALOE RD
+Right Turn Onto OLD SCARBOROUGH LN
 
-3:25 PM BLOUNT ST & MORGAN ST
-0 12 000.002
-Proceed On BLOUNT ST
-Right Turn Onto HARGETT ST
+7:08 AM OLD SCARBOROUGH LN & BENFIELD CT
+2 6 000.002
+Proceed On OLD SCARBOROUGH LN
+Right Turn Onto KIMLOCH DR
+Left Turn Onto HADRIAN DR
 
-3:30 PM HARGETT ST & WILMINGTON ST
-12 0 000.003
+7:11 AM HADRIAN DR & MARKETGATE WAY
+9 0 000.009
 `;

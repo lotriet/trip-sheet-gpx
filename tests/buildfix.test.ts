@@ -6,20 +6,20 @@ import { routeSheet } from "../src/lib/engine/route";
 import type { RawLine } from "../src/lib/engine/types";
 
 // Made-up streets and schools.
-test("school stop lines become a school search", () => {
+test("school stop lines become a school search", async () => {
   assert.equal(placeName("Deadhead - 1 OAK HS 0 0 @AB.012"), "OAK HS");
   assert.equal(expandPlaceQuery("Deadhead - 1 OAK HS 0 0 @AB.012"), "OAK High School");
   assert.equal(expandPlaceQuery("SCHOOL: BIRCH ELEM"), "BIRCH Elementary School");
   assert.equal(looksLikePlace("OAK HighSchool"), true);
 });
 
-test("a school start with a street number and DOORSIDE notes are understood", () => {
+test("a school start with a street number and DOORSIDE notes are understood", async () => {
   assert.deepEqual(classifyLocation("Deadhead - 1 OAK HS"), { kind: "school", name: "OAK HS" });
   assert.deepEqual(classifyLocation("OAK ST & ELM DR DOORSIDE"), { kind: "intersection", a: "OAK ST", b: "ELM DR" });
   assert.deepEqual(classifyLocation("OAK ST & ELM DR (DOORSIDE)"), { kind: "intersection", a: "OAK ST", b: "ELM DR" });
 });
 
-test("footer and confidentiality lines are ignored", () => {
+test("footer and confidentiality lines are ignored", async () => {
   const sheet = parseSheet(`Route: DEMO Description: OAK HS 01 Run: 900.101
 This document and information are provided in confidence for the sole purpose of transporting
 students, and may not be disclosed to any third party or used for any other purpose.
@@ -38,14 +38,14 @@ const lines = [
   line("Birch Lane", ["birch ln"], [[-78.7, 35.795], [-78.7, 35.8], [-78.7, 35.805]]),
 ];
 
-test("a first stop the map can't place doesn't stop the build", () => {
+test("a first stop the map can't place doesn't stop the build", async () => {
   const sheet = parseSheet(`07:00 AM Deadhead - ZEBRA CT & QUAIL WAY 0 0 900.010
 Proceed On MAPLE AVE
 07:03 AM MAPLE AVE & ELM ST 2 2 900.011
 Proceed On MAPLE AVE
 Left Turn Onto BIRCH LN
 07:06 AM BIRCH LN & MAPLE AVE 2 0 900.012`);
-  const result = routeSheet(sheet, { lines, places: [] });
+  const result = await routeSheet(sheet, { lines, places: [] });
   assert.equal(result.ok, true, result.ok ? "" : result.error);
   if (result.ok) assert.match(result.warnings[0].message, /Couldn't place the first stop/);
 });

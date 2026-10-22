@@ -85,10 +85,33 @@ function placeRouteKey(p: { tokens: string; level: string }): string {
 
 export function matchPlace(raw: string, places: RawPlace[]): RawPlace | null {
   const sig = schoolSig(raw.replace(/^\s*school\s*:\s*/i, ""));
-  const hits = places.filter((p) => sameSchool(sig, p));
+  // Re-read each place's name, so places saved by an older version still match.
+  const sigs = places.map((p) => ({ p, s: { ...schoolSig(p.name), level: schoolSig(p.name).level || p.level } }));
+  let hits = sigs.filter((x) => sameSchool(sig, x.s)).map((x) => x.p);
+  if (!hits.length && sig.tokens.length >= 5) {
+    // A letter misread: "GREEN HOEP HS". Same level, names one or two edits apart.
+    const max = sig.tokens.length >= 10 ? 2 : 1;
+    hits = sigs
+      .filter((x) => (!sig.level || !x.s.level || sig.level === x.s.level) && editDistance(sig.tokens, x.s.tokens) <= max)
+      .map((x) => x.p);
+  }
   if (!hits.length) return null;
   // Duplicate POI pins: keep the first; they sit on the same campus.
   return hits[0];
+}
+
+export function editDistance(a: string, b: string): number {
+  const prev = Array.from({ length: b.length + 1 }, (_, j) => j);
+  for (let i = 1; i <= a.length; i++) {
+    let diag = prev[0];
+    prev[0] = i;
+    for (let j = 1; j <= b.length; j++) {
+      const up = prev[j];
+      prev[j] = Math.min(prev[j] + 1, prev[j - 1] + 1, diag + (a[i - 1] === b[j - 1] ? 0 : 1));
+      diag = up;
+    }
+  }
+  return prev[b.length];
 }
 
 function lineNear(coords: LonLat[], point: LonLat, maxM: number): boolean {
@@ -139,6 +162,71 @@ export function prepareLines(sheet: Sheet, named: RawLine[], services: RawLine[]
   return lines;
 }
 
+/** Pairs of streets the sheet expects to meet: one direction after another, and each stop's corner. */
+function meetingPairs(sheet: Sheet, available: Set<string>, places: RawPlace[]): [string, string][] {
+  const out = new Map<string, [string, string]>();
+  const add = (a: string, b: string) => {
+    if (!a || !b || a === b || a.startsWith("place:") || b.startsWith("place:")) return;
+    const id = [a, b].sort().join("|");
+    if (!out.has(id)) out.set(id, [a, b]);
+  };
+  const flat = flattenManeuvers(sheet);
+  let prev = "";
+  for (const f of flat) {
+    const key = resolveTarget(f.maneuver.street, available, places).key;
+    if (prev) add(prev, key);
+    prev = key;
+  }
+  for (const stop of sheet.stops) {
+    const loc = classifyLocation(stop.description);
+    if (loc.kind === "intersection") add(resolveTarget(loc.a, available, places).key, resolveTarget(loc.b, available, places).key);
+  }
+  return [...out.values()];
+}
+
+const GAP_M = 40;
+
+/**
+ * The map tiles carry only named streets, so the unnamed piece where two of
+ * them meet (a roundabout, a short link, a divided-road crossover) is missing
+ * and the streets stop 10–40 m apart. For streets the sheet says meet but that
+ * never touch in the tiles, add a short join at each place they come closest.
+ */
+export function gapLinks(pairs: [string, string][], lines: GraphLine[]): GraphLine[] {
+  const out: GraphLine[] = [];
+  for (const [a, b] of pairs) {
+    const A = lines.filter((l) => l.keys.includes(a));
+    const B = lines.filter((l) => l.keys.includes(b));
+    if (!A.length || !B.length) continue;
+    const hits: { d: number; p: LonLat; q: LonLat }[] = [];
+    let touch = false;
+    const scan = (from: GraphLine[], to: GraphLine[], flip: boolean) => {
+      for (const la of from) {
+        for (const p of la.coords) {
+          for (const lb of to) {
+            const h = minDistToLine(p, lb.coords);
+            if (h.d <= 3) touch = true;
+            if (h.d <= GAP_M) hits.push(flip ? { d: h.d, p: h.point, q: p } : { d: h.d, p, q: h.point });
+          }
+        }
+      }
+    };
+    scan(A, B, false);
+    scan(B, A, true);
+    if (touch || !hits.length) continue;
+    hits.sort((x, y) => x.d - y.d);
+    const kept: typeof hits = [];
+    for (const h of hits) {
+      if (kept.some((k) => haversine(k.p, h.p) < 150)) continue;
+      kept.push(h);
+    }
+    for (const h of kept) {
+      out.push({ name: "gap", keys: [`xlink:${a}`, `xlink:${b}`, "gap:"], coords: [h.p, h.q], oneway: 0 });
+    }
+  }
+  return out;
+}
+
 function resolveTarget(
   raw: string,
   available: Set<string>,
@@ -165,6 +253,11 @@ function resolveTarget(
     return as === ks && as.length > 0;
   });
   if (hits.length === 1) return { key: hits[0], label: raw, how: "loose" };
+  // A space dropped or added by the reader ("MAPLEW OOD MILL RD"), the
+  // same rule the street check in the form uses, so a green mark always routes.
+  const squashed = key.replace(/\s+/g, "");
+  const joined = [...available].filter((a) => !a.startsWith("place:") && a.replace(/\s+/g, "") === squashed);
+  if (joined.length === 1) return { key: joined[0], label: raw, how: "loose" };
   return { key, label: raw, how: "missing" };
 }
 
@@ -574,14 +667,23 @@ function crossKey(
   return keys[0] ?? null;
 }
 
-function routeFrom(
+/**
+ * A road router for the places the map tiles can't connect: returns a driven
+ * line through the given points, or null. The app passes one backed by OSRM.
+ */
+export type Router = (points: LonLat[]) => Promise<LonLat[] | null>;
+
+const JUMP_NOTE = "Couldn't connect";
+
+async function routeFrom(
   graph: Graph,
   sheet: Sheet,
   start: GraphNode,
   available: Set<string>,
   places: RawPlace[],
   overrides: RouteOverrides,
-): RouteSuccess {
+  router?: Router,
+): Promise<RouteSuccess> {
   const warnings: Warning[] = [];
   const legs: RouteLeg[] = [];
   const turnarounds: TurnaroundPin[] = [];
@@ -589,6 +691,8 @@ function routeFrom(
   const coords: LonLat[] = [[start.coord[0], start.coord[1]]];
   let node = start;
   let heading: number | null = null;
+  /** The heading came from a straight join or the road router, so the next turn's angle can't be judged. */
+  let roughHeading = false;
   let currentKey: string | null = null;
   /** Intersection we just turned through. The next turn has to happen farther along the street. */
   let skipTurnAt: string | null = null;
@@ -611,6 +715,56 @@ function routeFrom(
     }
     const loose = goal.type === "turn" ? { type: "turn" as const, key: goal.key, dir: null } : goal;
     return follow(graph, node, null, along, loose, 16000, false, minMeters);
+  };
+
+  /** Nodes of a street, nearest a point. */
+  const nearestOn = (key: string, point: LonLat, also?: string | null): GraphNode | null => {
+    let best: { n: GraphNode; d: number } | null = null;
+    for (const n of graph.nodes.values()) {
+      if (!nodeHas(n, key) || (also && !nodeHas(n, also))) continue;
+      const d = haversine(n.coord, point);
+      if (!best || d < best.d) best = { n, d };
+    }
+    return best?.n ?? null;
+  };
+
+  /**
+   * The tile graph can't get from here to the next street on the sheet (a
+   * piece of road missing from the tiles, an unnamed roundabout). Go to where
+   * the two streets meet, or the nearest point of the next street, by the road
+   * router, with a via point on the street we're on so it keeps to it.
+   */
+  const jumpTo = async (toKey: string, label: string, stopIndex: number, maneuverIndex: number): Promise<boolean> => {
+    const target = (currentKey ? nearestOn(toKey, node.coord, currentKey) : null) ?? nearestOn(toKey, node.coord);
+    if (!target || target.id === node.id) return false;
+    const from = node.coord;
+    const to = target.coord;
+    if (haversine(from, to) > 8000) return false;
+    let path: LonLat[] | null = null;
+    if (router) {
+      const viaNode = currentKey && currentKey !== toKey ? nearestOn(currentKey, to) : null;
+      const via = viaNode && haversine(viaNode.coord, to) > 60 && haversine(viaNode.coord, from) > 60 ? viaNode.coord : null;
+      try {
+        path = await router(via ? [from, via, to] : [from, to]);
+      } catch {
+        path = null;
+      }
+      if (path && (path.length < 2 || polylineMeters(path) > 2.5 * haversine(from, to) + 800)) path = null;
+    }
+    const line = path ?? [from, to];
+    appendLine(coords, line, 0.4);
+    node = target;
+    heading = line.length >= 2 ? arrivalHeading(line) : heading;
+    roughHeading = true;
+    warn(
+      path ? "info" : "warn",
+      stopIndex,
+      maneuverIndex,
+      path
+        ? `The map tiles have a gap before ${label}; the road router joined it.`
+        : `${JUMP_NOTE} to ${label} on the map. The track draws a straight line here. Check it.`,
+    );
+    return true;
   };
 
   const hopVias = (key: string) => {
@@ -646,6 +800,8 @@ function routeFrom(
           appendLine(coords, leg.coords, 0.4);
           node = leg.node;
           heading = leg.heading;
+        } else {
+          await jumpTo(target.key, maneuver.street, stopIndex, maneuverIndex);
         }
       }
       const pinId = `${stopIndex}:${maneuverIndex}`;
@@ -699,6 +855,8 @@ function routeFrom(
             heading = arrivalHeading(turn.edge.coords);
             currentKey = target.key;
           }
+        } else if (await jumpTo(target.key, maneuver.street, stopIndex, maneuverIndex)) {
+          currentKey = target.key;
         } else {
           warn("warn", stopIndex, maneuverIndex, `Couldn't stay on the sheet from here onto ${maneuver.street}.`);
         }
@@ -719,8 +877,8 @@ function routeFrom(
           if (!loose.matched) {
             warn("warn", stopIndex, maneuverIndex, `The ${dir} turn onto ${maneuver.street} did not match a clear intersection. The track uses the closest connection.`);
           }
-        } else if (target.how !== "missing") {
-          warn("warn", stopIndex, maneuverIndex, `Couldn't follow the sheet from ${currentKey} onto ${maneuver.street}.`);
+        } else if (target.how !== "missing" && !(await jumpTo(target.key, maneuver.street, stopIndex, maneuverIndex))) {
+          warn("warn", stopIndex, maneuverIndex, `Couldn't follow the sheet onto ${maneuver.street}.`);
         }
       }
       if (target.how !== "missing") {
@@ -731,9 +889,21 @@ function routeFrom(
           heading = arrivalHeading(turn.edge.coords);
           currentKey = target.key;
           skipTurnAt = node.id;
-          if (!turn.matched) {
-            warn("warn", stopIndex, maneuverIndex, `Turned onto ${maneuver.street}, but the angle was not a clear ${dir}. Check this turn.`);
+          if (!turn.matched && !roughHeading) {
+            // Nearly straight on: the street changes its name here, or the road
+            // bends into the turn before the junction. The track is still on
+            // the named street, so it's a note, not a problem.
+            const straightOn = Math.abs(turn.angle) < 30;
+            warn(
+              straightOn ? "info" : "warn",
+              stopIndex,
+              maneuverIndex,
+              straightOn
+                ? `The ${dir} turn onto ${maneuver.street} is almost straight on the map.`
+                : `Turned onto ${maneuver.street}, but the angle was not a clear ${dir}. Check this turn.`,
+            );
           }
+          roughHeading = false;
         } else if (!warnings.some((w) => w.stopIndex === stopIndex && w.maneuverIndex === maneuverIndex)) {
           warn("warn", stopIndex, maneuverIndex, `No connection found for the ${dir} turn onto ${maneuver.street}.`);
         }
@@ -750,7 +920,7 @@ function routeFrom(
           appendLine(coords, leg.coords, 0.4);
           node = leg.node;
           heading = leg.heading;
-        } else {
+        } else if (!(await jumpTo(dest, sheet.stops.at(-1)?.description ?? "the last stop", sheet.stops.length - 1, 0))) {
           warn("warn", sheet.stops.length - 1, 0, `Couldn't reach the last stop on ${sheet.stops.at(-1)?.description ?? "the sheet"}.`);
         }
       }
@@ -858,11 +1028,12 @@ function scoreRoute(r: RouteSuccess): number {
   return hard * 1e9 - traveled * 1e6 + r.meters;
 }
 
-export function routeSheet(
+export async function routeSheet(
   sheet: Sheet,
   data: { lines: RawLine[]; places: RawPlace[] },
   overrides: RouteOverrides = {},
-): RouteResult {
+  router?: Router,
+): Promise<RouteResult> {
   if (!sheet.stops.length) {
     return { ok: false, error: "No stops were found on the sheet.", warnings: [] } satisfies RouteFailure;
   }
@@ -880,6 +1051,8 @@ export function routeSheet(
       if (!looksLikePlace(m.street)) linkKeys.add(canonicalKey(m.street));
     }
   }
+  const lineKeys = new Set(graphLines.flatMap((l) => l.keys));
+  graphLines.push(...gapLinks(meetingPairs(sheet, lineKeys, data.places), graphLines));
   const graph = buildGraph(graphLines, linkKeys);
   const available = keysInGraph(graph);
   // Where the track starts: the first stop, or, when the map can't place it,
@@ -939,9 +1112,19 @@ export function routeSheet(
   // Intersections of two long roads can repeat. Try a handful and keep the cleanest trace.
   if (starts.length > 6) starts = starts.slice(0, 6);
   let best: RouteSuccess | null = null;
+  let bestStart: GraphNode | null = null;
   for (const s of starts) {
-    const r = routeFrom(graph, sheet, s, available, data.places, overrides);
-    if (!best || scoreRoute(r) < scoreRoute(best)) best = r;
+    // Let the page repaint between tries, so the phone doesn't look frozen.
+    await new Promise((r) => setTimeout(r, 0));
+    const r = await routeFrom(graph, sheet, s, available, data.places, overrides);
+    if (!best || scoreRoute(r) < scoreRoute(best)) {
+      best = r;
+      bestStart = s;
+    }
+  }
+  // Where the tiles left gaps, drive them again with the road router.
+  if (router && best && bestStart && best.warnings.some((w) => w.message.startsWith(JUMP_NOTE))) {
+    best = await routeFrom(graph, sheet, bestStart, available, data.places, overrides, router);
   }
   if (!best || best.coords.length < 2) {
     return { ok: false, error: "The streets on the sheet did not connect into a route.", warnings: best?.warnings ?? [] };

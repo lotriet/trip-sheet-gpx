@@ -12,7 +12,7 @@ import { preparePage, resize, rgbaToGray, rotate, rotationCandidates, type Gray 
 import { judgeSheetText, keepLines, RETAKE_MESSAGE, type OcrLine } from "./ocr/quality";
 
 export type PhotoResult =
-  | { ok: true; name: string; text: string }
+  | { ok: true; name: string; text: string; /** Small JPEG of the page as read, for telling pages apart. */ thumb?: string }
   | { ok: false; name: string; reason: string };
 
 /** Longest side we decode to. Keeps phones under their canvas memory limits. */
@@ -83,15 +83,15 @@ async function readOne(worker: Worker, file: Blob, name: string): Promise<PhotoR
     if (!keep.length) return { ok: false, name, reason: RETAKE_MESSAGE };
     candidates = keep;
   }
-  let best: { text: string; score: number; ok: boolean } | null = null;
+  let best: { text: string; score: number; ok: boolean; degrees: number } | null = null;
   for (const degrees of candidates) {
     const text = await readLines(worker, rotate(prepared.image, degrees));
     const q = judgeSheetText(text);
-    if (!best || q.score > best.score) best = { text, score: q.score, ok: q.ok };
+    if (!best || q.score > best.score) best = { text, score: q.score, ok: q.ok, degrees };
     if (q.ok) break;
   }
   if (!best?.ok) return { ok: false, name, reason: RETAKE_MESSAGE };
-  return { ok: true, name, text: best.text };
+  return { ok: true, name, text: best.text, thumb: thumbnail(rotate(prepared.image, best.degrees)) };
 }
 
 /** OCR an image and return only the confident, word-like lines. */
@@ -157,6 +157,18 @@ export async function isHeic(file: Blob): Promise<boolean> {
   const ftyp = String.fromCharCode(...head.slice(4, 8));
   const brand = String.fromCharCode(...head.slice(8, 12));
   return ftyp === "ftyp" && /^(heic|heix|hevc|hevx|heim|heis|mif1|msf1)$/.test(brand);
+}
+
+/** The page, upright and small enough to keep in memory: wide enough to read the header when enlarged. */
+function thumbnail(g: Gray): string | undefined {
+  try {
+    const canvas = grayToCanvas(shrink(g, 900));
+    const url = canvas.toDataURL("image/jpeg", 0.6);
+    canvas.width = canvas.height = 0;
+    return url;
+  } catch {
+    return undefined;
+  }
 }
 
 function grayToCanvas(g: Gray): HTMLCanvasElement {

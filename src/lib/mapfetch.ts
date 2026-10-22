@@ -1,5 +1,7 @@
 import { decodeTiles, type TileBuffer } from "./engine/tiles";
-import { expandPlaceQuery, looksLikePlace, titleCaseStreet } from "./engine/names";
+import { expandPlaceQuery, looksLikePlace, schoolSig, titleCaseStreet } from "./engine/names";
+import { matchPlace } from "./engine/route";
+import { KNOWN_SCHOOLS, WAKE_BBOX } from "./engine/schools";
 import { classifyLocation } from "./engine/parseSheet";
 import type { LonLat, RawLine, RawPlace, Sheet } from "./engine/types";
 
@@ -35,16 +37,70 @@ async function photon(
   url.searchParams.set("q", query);
   if (filter?.tag) url.searchParams.set("osm_tag", filter.tag);
   if (filter?.layer) url.searchParams.set("layer", filter.layer);
+  // Keep answers in Wake County; the bias pulls them toward the run.
+  url.searchParams.set("bbox", `${WAKE_BBOX.minLon},${WAKE_BBOX.minLat},${WAKE_BBOX.maxLon},${WAKE_BBOX.maxLat}`);
   url.searchParams.set("lat", String(bias.lat));
   url.searchParams.set("lon", String(bias.lon));
   url.searchParams.set("limit", "5");
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`Geocoder responded ${res.status}`);
-  const json = (await res.json()) as { features?: PhotonFeature[] };
-  return json.features ?? [];
+  const key = url.toString();
+  const hit = photonCache.get(key);
+  if (hit) return hit;
+  // The public geocoder turns away bursts (and then sends no CORS header, so
+  // the browser only sees a failed fetch) and sometimes never answers. Space
+  // the lookups out, give up on one after a few seconds, and try once more.
+  let lastError: unknown = null;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const features = await queued(() => fetchJson<{ features?: PhotonFeature[] }>(key, 8000));
+      const out = features.features ?? [];
+      photonCache.set(key, out);
+      return out;
+    } catch (err) {
+      lastError = err;
+      await sleep(1200 * (attempt + 1));
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error("The geocoder did not answer.");
 }
 
-function keepFeature(f: PhotonFeature, bias: { lat: number; lon: number }): { lon: number; lat: number; extent?: Bbox } | null {
+const photonCache = new Map<string, PhotonFeature[]>();
+let lane: Promise<unknown> = Promise.resolve();
+let lastCall = 0;
+const GAP_MS = 400;
+
+function sleep(ms: number) {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+/** One geocoder request at a time, at most one every GAP_MS. */
+function queued<T>(job: () => Promise<T>): Promise<T> {
+  const run = lane.then(async () => {
+    const wait = lastCall + GAP_MS - Date.now();
+    if (wait > 0) await sleep(wait);
+    lastCall = Date.now();
+    return job();
+  });
+  lane = run.catch(() => undefined);
+  return run;
+}
+
+async function fetchJson<T>(url: string, timeoutMs: number): Promise<T> {
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), timeoutMs);
+  try {
+    const res = await fetch(url, { signal: ctl.signal });
+    if (!res.ok) throw new Error(`Geocoder responded ${res.status}`);
+    return (await res.json()) as T;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function keepFeature(
+  f: PhotonFeature,
+  bias: { lat: number; lon: number },
+  maxKm = 45,
+): { lon: number; lat: number; extent?: Bbox; name?: string } | null {
   const coords = f.geometry?.coordinates;
   if (!coords) return null;
   const [lon, lat] = coords;
@@ -54,13 +110,20 @@ function keepFeature(f: PhotonFeature, bias: { lat: number; lon: number }): { lo
   if (props.countrycode && props.countrycode !== "US") return null;
   const dLat = (lat - bias.lat) * 111;
   const dLon = (lon - bias.lon) * 111 * Math.cos((bias.lat * Math.PI) / 180);
-  if (Math.hypot(dLat, dLon) > 45) return null;
+  if (Math.hypot(dLat, dLon) > maxKm) return null;
   let extent: Bbox | undefined;
   if (props.extent && props.extent.length === 4) {
     const [minLon, maxLat, maxLon, minLat] = props.extent;
     extent = { minLon, minLat, maxLon, maxLat };
   }
-  return { lon, lat, extent };
+  return { lon, lat, extent, name: props.name };
+}
+
+/** The built-in school list, in the shape the route builder matches against. */
+export const knownPlaces: RawPlace[] = KNOWN_SCHOOLS.map(([name, lat, lon]) => ({ name, lat, lon, ...schoolSig(name) }));
+
+function knownSchool(raw: string): RawPlace | null {
+  return looksLikePlace(raw) ? matchPlace(raw, knownPlaces) : null;
 }
 
 export function bboxFromPoints(points: { lon: number; lat: number; extent?: Bbox }[]): Bbox | null {
@@ -179,6 +242,23 @@ async function template(): Promise<string> {
   return url;
 }
 
+/** A tile that hangs should not hold up the map; one retry for a dropped one. */
+async function fetchTile(url: string): Promise<Response | null> {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const ctl = new AbortController();
+    const timer = setTimeout(() => ctl.abort(), 15000);
+    try {
+      const res = await fetch(url, { signal: ctl.signal });
+      if (res.ok || res.status === 404) return res;
+    } catch {
+      /* try again below */
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+  return null;
+}
+
 async function readTiles(box: Bbox, onStatus?: (s: string) => void): Promise<MapData> {
   const tiles = tilesInBbox(box);
   onStatus?.(`Reading ${tiles.length} map tiles…`);
@@ -187,8 +267,8 @@ async function readTiles(box: Bbox, onStatus?: (s: string) => void): Promise<Map
   await Promise.all(
     tiles.map(async (t) => {
       const url = pattern.replace("{z}", String(t.z)).replace("{x}", String(t.x)).replace("{y}", String(t.y));
-      const res = await fetch(url);
-      if (!res.ok) return;
+      const res = await fetchTile(url);
+      if (!res?.ok) return;
       buffers.push({ ...t, bytes: new Uint8Array(await res.arrayBuffer()) });
     }),
   );
@@ -214,13 +294,20 @@ export async function loadMap(
 ): Promise<MapData> {
   onStatus?.("Finding these streets…");
   const bias = await areaBias(area);
-  const queries = sheetQueries(sheet);
   const points: { lon: number; lat: number; extent?: Bbox }[] = [];
+  // Schools the app already knows anchor the area without asking the geocoder.
+  for (const raw of sheetPlaceNames(sheet)) {
+    const p = knownSchool(raw);
+    if (p) points.push({ lon: p.lon, lat: p.lat });
+  }
+  const queries = sheetQueries(sheet).filter((q) => !knownSchool(q));
   for (const q of queries) {
+    // Once one stop is found, look for the rest near it, not across the county.
+    const anchor = points.length ? middle(points) : null;
     try {
-      const features = await geocode(q, bias);
+      const features = await geocode(q, anchor ?? bias);
       for (const f of features) {
-        const k = keepFeature(f, bias);
+        const k = keepFeature(f, anchor ?? bias, anchor ? 20 : 45);
         if (k) {
           points.push(k);
           break;
@@ -237,5 +324,67 @@ export async function loadMap(
     maxLat: bias.lat + 0.06,
   };
   onStatus?.("Matching the printed streets…");
-  return readTiles(box, onStatus);
+  return withKnownSchools(await readTiles(box, onStatus), box);
+}
+
+function middle(points: { lon: number; lat: number }[]): { lon: number; lat: number } {
+  const lats = points.map((p) => p.lat).sort((a, b) => a - b);
+  const lons = points.map((p) => p.lon).sort((a, b) => a - b);
+  return { lat: lats[Math.floor(lats.length / 2)], lon: lons[Math.floor(lons.length / 2)] };
+}
+
+function sheetPlaceNames(sheet: Sheet): string[] {
+  const out: string[] = [];
+  for (const stop of sheet.stops) {
+    const loc = classifyLocation(stop.description);
+    if (loc.kind === "school") out.push(loc.name);
+    for (const m of stop.maneuvers) if (looksLikePlace(m.street)) out.push(m.street);
+  }
+  return out;
+}
+
+/** Add the built-in schools inside the map area that the tiles didn't label. */
+function withKnownSchools(data: MapData, box: Bbox): MapData {
+  const extra = knownPlaces.filter(
+    (k) =>
+      k.lon >= box.minLon && k.lon <= box.maxLon && k.lat >= box.minLat && k.lat <= box.maxLat &&
+      !data.places.some((p) => p.tokens === k.tokens && (p.level || "") === (k.level || "") && Math.abs(p.lat - k.lat) < 0.01 && Math.abs(p.lon - k.lon) < 0.01),
+  );
+  return extra.length ? { ...data, places: [...data.places, ...extra] } : data;
+}
+
+export type Lookup = { name: string; lat: number; lon: number; place: boolean };
+
+/**
+ * Look one name up right now, near the run: a school from the built-in list
+ * or the geocoder, or a street from the geocoder. Null when nothing matching
+ * is within a few miles of the run.
+ */
+export async function lookupName(raw: string, near: { lat: number; lon: number }): Promise<Lookup | null> {
+  const known = knownSchool(raw);
+  if (known) return { name: known.name, lat: known.lat, lon: known.lon, place: true };
+  const q = streetQuery(raw).trim();
+  if (!q) return null;
+  const features = await geocode(q, near);
+  for (const f of features) {
+    const k = keepFeature(f, near, 12);
+    if (k) return { name: k.name ?? q, lat: k.lat, lon: k.lon, place: looksLikePlace(raw) };
+  }
+  return null;
+}
+
+/** Map data for a small area around one point, to add to a run's map. */
+export async function loadAround(point: { lat: number; lon: number }, onStatus?: (s: string) => void): Promise<MapData> {
+  const d = 0.012;
+  const box = { minLon: point.lon - d, maxLon: point.lon + d, minLat: point.lat - d, maxLat: point.lat + d };
+  return withKnownSchools(await readTiles(box, onStatus), box);
+}
+
+/** Two map areas as one. */
+export function mergeMaps(a: MapData, b: MapData): MapData {
+  const seen = new Set(a.places.map((p) => `${p.name}|${p.lat.toFixed(4)}|${p.lon.toFixed(4)}`));
+  return {
+    lines: [...a.lines, ...b.lines],
+    places: [...a.places, ...b.places.filter((p) => !seen.has(`${p.name}|${p.lat.toFixed(4)}|${p.lon.toFixed(4)}`))],
+  };
 }

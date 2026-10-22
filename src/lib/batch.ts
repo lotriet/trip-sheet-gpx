@@ -7,11 +7,12 @@
  * by their first stop. Pure functions, so they can be tested without a browser.
  */
 
-import { parseSheet } from "./engine/parseSheet";
+import { schoolSig } from "./engine/names";
+import { classifyLocation, parseSheet } from "./engine/parseSheet";
 import type { Sheet, Stop } from "./engine/types";
 
 /** One page of text: a photo, part of a photo, or pasted text. `photo` is -1 for pasted text. */
-export type PageRead = { photo: number; name: string; text: string };
+export type PageRead = { photo: number; name: string; text: string; thumb?: string };
 
 export type PageInfo = PageRead & {
   /** "123.456", or null when the header couldn't be read. */
@@ -74,52 +75,93 @@ function nearRun(a: string, b: string): boolean {
   return diff <= 1;
 }
 
+/** Minutes between a run's last stop and a continuation page's first stop that still count as "next". */
+const CONTINUE_GAP = 60;
+
 /**
- * A trip key for every page, in the same order as `pages`.
- * Pages share a key when their run numbers match. A continuation page whose
- * number is one character off an existing run (an OCR slip) joins that run;
- * two first pages are never merged that way, since real run numbers on one
- * route can differ by a single digit. A page with no readable run number
- * joins the previous photo's trip, unless it starts with a Deadhead line,
- * which always begins a new trip.
+ * A trip key for every page, in the same order as `pages`. The result does
+ * not depend on the order the photos were picked in, except for a page that
+ * has neither a run number nor a stop time.
+ *
+ * 1. A first page (it starts with a stop, not with directions) is keyed by
+ *    the Run number in its header. Without one, a page that opens with a
+ *    Deadhead stop starts a trip of its own.
+ * 2. A continuation page (directions before any stop) joins a run only when
+ *    its times follow that run's last stop: the run its header names, else a
+ *    run one character off (an OCR slip), else the run whose last stop comes
+ *    closest before it. It never joins a run whose times it doesn't continue.
+ *    Continuation pages are placed earliest first, so a third page follows
+ *    the second.
  */
 export function autoGroup(pages: PageInfo[]): string[] {
-  const starts = new Set(pages.filter((p) => p.run && !p.continues).map((p) => p.run as string));
-  const keys: string[] = [];
+  const keys: (string | null)[] = pages.map(() => null);
+  const isFirst = (p: PageInfo) => !p.continues && (!!p.run || p.starts);
   pages.forEach((p, i) => {
-    if (p.run) {
-      if (!starts.has(p.run) && p.continues) {
-        const near = [...starts].filter((k) => nearRun(k, p.run as string));
-        if (near.length === 1) {
-          keys.push(near[0]);
-          return;
-        }
-      }
-      keys.push(p.run);
-    } else if (!p.starts && (i > 0 || pages.some((q) => q.run))) {
-      // A continuation page: the run whose first page ends closest before it starts,
-      // or else the previous photo's trip.
-      keys.push(closestBefore(p, pages, keys, i) ?? keys[i - 1] ?? pages.find((q) => q.run)?.run ?? "trip-1");
-    } else {
-      // No run number, but a Deadhead line: a new run starts here.
-      keys.push(newTripKey(keys));
-    }
+    if (!isFirst(p)) return;
+    keys[i] = p.run ?? newTripKey(keys.filter((k): k is string => !!k));
   });
-  return keys;
+
+  const lastOf = (key: string): number | null => {
+    let last: number | null = null;
+    pages.forEach((q, j) => {
+      if (keys[j] === key && q.last != null) last = last == null ? q.last : Math.max(last, q.last);
+    });
+    return last;
+  };
+  const follows = (p: PageInfo, key: string): number | null => {
+    if (p.first == null) return 0;
+    const last = lastOf(key);
+    if (last == null) return 0;
+    const gap = p.first - last;
+    return gap >= 0 && gap <= CONTINUE_GAP ? gap : null;
+  };
+
+  const rest = pages
+    .map((p, i) => ({ p, i }))
+    .filter(({ i }) => keys[i] == null)
+    .sort((a, b) => (a.p.first ?? Infinity) - (b.p.first ?? Infinity) || a.p.photo - b.p.photo || a.i - b.i);
+  for (const { p, i } of rest) {
+    const existing = [...new Set(keys.filter((k): k is string => !!k))];
+    const fits = existing.map((key) => ({ key, gap: follows(p, key) })).filter((f) => f.gap != null) as { key: string; gap: number }[];
+    let key: string | undefined;
+    if (p.run) key = fits.find((f) => f.key === p.run)?.key;
+    if (!key && p.run) {
+      const near = fits.filter((f) => /^\d{3}\.\w{3}$/.test(f.key) && nearRun(f.key, p.run as string));
+      if (near.length === 1) key = near[0].key;
+    }
+    if (!key && p.first != null) key = fits.sort((a, b) => a.gap - b.gap)[0]?.key;
+    if (!key && p.first == null) {
+      // No times to go by: the header's run, else the photo taken just before it.
+      key = (p.run && existing.includes(p.run) ? p.run : undefined) ?? keys[i - 1] ?? undefined;
+    }
+    keys[i] = key ?? p.run ?? newTripKey(existing);
+  }
+  return keys.map((k) => k ?? "trip-1");
 }
 
-function closestBefore(page: PageInfo, pages: PageInfo[], keys: string[], at: number): string | null {
-  if (page.first == null) return null;
-  let best: { key: string; gap: number } | null = null;
-  pages.forEach((q, j) => {
-    if (j === at || !q.starts || q.last == null || !q.run) return;
-    const gap = (page.first as number) - q.last;
-    // Within an hour after that page's last stop.
-    if (gap < 0 || gap > 60) return;
-    const key = keys[j] ?? q.run;
-    if (!best || gap < best.gap) best = { key, gap };
-  });
-  return (best as { key: string; gap: number } | null)?.key ?? null;
+/**
+ * The same page photographed twice: same run, same stop times. Keep the first.
+ * Returns the pages to keep and the photos that were left out.
+ */
+export function dropDuplicatePages(pages: PageInfo[]): { pages: PageInfo[]; dropped: PageInfo[] } {
+  const seen = new Set<string>();
+  const kept: PageInfo[] = [];
+  const dropped: PageInfo[] = [];
+  for (const p of pages) {
+    const sheet = parseSheet(p.text);
+    const times = sheet.stops.map((s) => s.time).filter(Boolean);
+    if (times.length < 2) {
+      kept.push(p);
+      continue;
+    }
+    const sig = `${p.run ?? "?"}|${times.join(",")}|${sheet.stops.length}`;
+    if (seen.has(sig)) dropped.push(p);
+    else {
+      seen.add(sig);
+      kept.push(p);
+    }
+  }
+  return { pages: kept, dropped };
 }
 
 function orderPages(pages: PageInfo[]): PageInfo[] {
@@ -241,7 +283,37 @@ export function sortStopsByTime(sheet: Sheet): Sheet {
     else if (ordered.length) ordered[0].maneuvers.unshift(...stop.maneuvers);
     else ordered.push(stop);
   }
-  return { ...sheet, stops: ordered };
+  return { ...sheet, stops: mergeSameSchool(ordered) };
+}
+
+/**
+ * A run that starts at a school prints it twice at the same minute: the
+ * Deadhead line and the "SCHOOL:" line. Show it as one stop, with the
+ * directions of both, named by the SCHOOL: line.
+ */
+export function mergeSameSchool(stops: Stop[]): Stop[] {
+  const out: Stop[] = [];
+  const sig = (s: Stop) => {
+    const loc = classifyLocation(s.description);
+    return loc.kind === "school" ? schoolSig(loc.name) : null;
+  };
+  for (const stop of stops) {
+    const prev = out.at(-1);
+    const a = prev ? sig(prev) : null;
+    const b = sig(stop);
+    if (prev && a && b && a.tokens && a.tokens === b.tokens && (!a.level || !b.level || a.level === b.level) && minutesOf(prev.time) === minutesOf(stop.time)) {
+      const keep = /^\s*school\s*:/i.test(stop.description) || !/^\s*school\s*:/i.test(prev.description) ? stop : prev;
+      out[out.length - 1] = {
+        ...keep,
+        stopLoad: keep.stopLoad ?? prev.stopLoad ?? stop.stopLoad,
+        runLoad: keep.runLoad ?? stop.runLoad ?? prev.runLoad,
+        maneuvers: [...prev.maneuvers, ...stop.maneuvers],
+      };
+      continue;
+    }
+    out.push(stop);
+  }
+  return out;
 }
 
 const TIME_LINE = /^\W{0,3}(\d{1,2}\s?:\s?\d{2})\s*([AP])\.?M\b(.*)$/i;

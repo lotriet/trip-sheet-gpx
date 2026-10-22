@@ -10,6 +10,11 @@ function cleanLine(s: string): string {
     .replace(/[[\]{}]/g, "")
     .replace(/\btu[mn]\b/gi, "Turn")
     .replace(/\b[0O]nt[o0]\b/g, "Onto")
+    // Route numbers misread as letters: "NC SS HWY" is NC 55, "US 1O" is US 10.
+    .replace(/\b(NC|US|I)([\s-]+)([0-9SOIlBZ]{1,3})\b/g, (m, net: string, gap: string, num: string) => {
+      const fixed = num.replace(/S/g, "5").replace(/O/g, "0").replace(/[Il]/g, "1").replace(/B/g, "8").replace(/Z/g, "2");
+      return /\d/.test(num) || /^(?:SS|S|SSS)$/.test(num) || /[SOIlBZ]/.test(num) ? `${net}${gap}${fixed}` : m;
+    })
     .replace(/\s+/g, " ")
     .trim()
     // OCR often adds stray marks from the page edge before or after a line.
@@ -61,6 +66,18 @@ function readLoad(s: string): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
+// Words a stop line ends on; anything after the last one with a digit in it is
+// load or stop-id columns the reader garbled ("ELM WAY 12 3 39112").
+const LINE_END =
+  /^(.*\b(?:rd|road|st|street|dr|drive|ln|lane|pkwy|parkway|ave|avenue|ct|court|blvd|boulevard|cir|circle|pl|place|trl|trail|ter|terrace|way|hwy|xing|loop|run|pt|sq|hs|es|ms|elem|school))\b\s+(.+)$/i;
+
+function dropJunkTail(text: string): string {
+  const m = text.match(LINE_END);
+  if (!m || !/\d/.test(m[2]) || /&/.test(m[2])) return text;
+  if (/\b(rd|st|dr|ln|ave|way|ct|blvd|pkwy|hwy)\b/i.test(m[2])) return text;
+  return m[1].trim();
+}
+
 function peelTail(raw: string): {
   text: string;
   stopLoad: number | null;
@@ -70,11 +87,11 @@ function peelTail(raw: string): {
   const s = trimCrumbs(raw);
   const full = s.match(new RegExp(String.raw`^(.*?)(?:\s+-)?\s+(\S{1,3})\s+(\S{1,3})\s+(${STOP_ID})\s*$`));
   if (full && full[1].trim()) {
-    return { text: full[1].trim(), stopLoad: readLoad(full[2]), runLoad: readLoad(full[3]), stopId: fixId(full[4]) };
+    return { text: dropJunkTail(full[1].trim()), stopLoad: readLoad(full[2]), runLoad: readLoad(full[3]), stopId: fixId(full[4]) };
   }
   const idOnly = s.match(/^(.*\D)\s+([0-9@][0-9A-Za-z]{2}\.[0-9A-Za-z]{3})\s*$/);
-  if (idOnly) return { text: idOnly[1].trim(), stopLoad: null, runLoad: null, stopId: idOnly[2] };
-  return { text: s.trim(), stopLoad: null, runLoad: null, stopId: null };
+  if (idOnly) return { text: dropJunkTail(idOnly[1].trim()), stopLoad: null, runLoad: null, stopId: idOnly[2] };
+  return { text: dropJunkTail(s.trim()), stopLoad: null, runLoad: null, stopId: null };
 }
 
 function parseManeuver(line: string): Maneuver | null {
@@ -104,6 +121,8 @@ export function classifyLocation(description: string): StopLocation {
   // "1 OAK HS": a campus written with a street number.
   const campus = d.replace(/^\d+\s+/, "");
   if (campus !== d && looksLikePlace(campus)) return { kind: "school", name: campus };
+  // "OAK HS 16 (DB)": a campus with its bell number and a note.
+  if (!/[&@]/.test(d) && looksLikePlace(campus)) return { kind: "school", name: campus };
   if (/@/.test(d) || /end of(?: the)? (sidewalk|road|street|court)/i.test(d)) {
     const street = d.split("@")[0].replace(/\bend of\b.*$/i, "").trim();
     if (street) return { kind: "end", street };
@@ -202,13 +221,54 @@ export function parseSheet(raw: string): Sheet {
     route,
     description: description.replace(/\s+run\s*:.*$/i, "").trim(),
     run,
-    stops: stops
-      .filter((s) => s.description || s.maneuvers.length || s.time)
-      .map((stop) => {
-        delete stop.wrapped;
-        return stop as Stop;
-      }),
+    stops: expandStopNames(
+      stops
+        .filter((s) => s.description || s.maneuvers.length || s.time)
+        .map((stop) => {
+          delete stop.wrapped;
+          return stop as Stop;
+        }),
+    ),
   };
+}
+
+const STREET_SUFFIX = /^(rd|road|st|street|dr|drive|ln|lane|pkwy|parkway|ave|avenue|ct|court|blvd|boulevard|cir|circle|pl|place|trl|trail|ter|terrace|way|hwy|xing|loop)$/i;
+
+/**
+ * The sheet cuts long street names short in stop lines ("LAKE OF T" for
+ * LAKE OF THE PINES, "MAPLEWOOD ME RD" for MAPLEWOOD MEADOW RD). When exactly
+ * one street in the directions starts the same way, use its full name.
+ */
+export function expandShortName(part: string, streets: string[]): string {
+  const words = part.trim().toUpperCase().split(/\s+/);
+  if (!words.length || words.some((w) => !/^[A-Z0-9]+$/.test(w))) return part;
+  const hasSuffix = words.length > 1 && STREET_SUFFIX.test(words.at(-1)!);
+  const head = hasSuffix ? words.slice(0, -1) : words;
+  const fits = (full: string) => {
+    const fw = full.toUpperCase().split(/\s+/);
+    if (full.toUpperCase() === part.trim().toUpperCase()) return false;
+    if (hasSuffix) {
+      if (fw.length !== words.length || fw.at(-1) !== words.at(-1)) return false;
+    } else if (fw.length < head.length) return false;
+    return head.every((w, i) => (i === head.length - 1 ? fw[i].startsWith(w) && fw[i].length > w.length || (fw[i] === w && fw.length > head.length) : fw[i] === w));
+  };
+  const known = [...new Set(streets.map((s) => s.trim().toUpperCase()))];
+  if (known.includes(part.trim().toUpperCase())) return part;
+  const hits = known.filter(fits);
+  return hits.length === 1 && head.length >= 2 ? hits[0] : part;
+}
+
+function expandStopNames(stops: Stop[]): Stop[] {
+  const streets = stops.flatMap((s) => s.maneuvers.map((m) => m.street)).filter(Boolean);
+  return stops.map((stop) => {
+    const loc = classifyLocation(stop.description);
+    if (loc.kind !== "intersection") return stop;
+    const a = expandShortName(loc.a, streets);
+    const b = expandShortName(loc.b, streets);
+    if (a === loc.a && b === loc.b) return stop;
+    const lead = /^\s*deadhead\s*-?\s*/i.exec(stop.description)?.[0] ?? "";
+    return { ...stop, description: `${lead ? "Deadhead - " : ""}${a} & ${b}` };
+  });
 }
 
 export function flattenManeuvers(sheet: Sheet): { stopIndex: number; maneuverIndex: number; maneuver: Maneuver }[] {
