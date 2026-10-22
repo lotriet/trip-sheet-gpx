@@ -417,7 +417,7 @@ export function TripApp() {
     if (reviewKey === from) setReviewKey(null);
   }
 
-  function savedRunFrom(id: string, sheetText: string, built: Sheet, result: RouteSuccess, vias: { lat: number; lon: number }[] = []): SavedRun {
+  function savedRunFrom(id: string, sheetText: string, built: Sheet, result: RouteSuccess, vias: { lat: number; lon: number; street?: string }[] = []): SavedRun {
     return {
       id,
       area,
@@ -542,7 +542,13 @@ export function TripApp() {
         return;
       }
       setRoute(result);
-      setOverrides(nextOverrides);
+      setOverrides({
+        ...nextOverrides,
+        vias: (nextOverrides.vias ?? []).map((v, i) => {
+          const street = result.viaStreets[i] || v.street;
+          return street ? { lat: v.lat, lon: v.lon, street } : { lat: v.lat, lon: v.lon };
+        }),
+      });
       setView("preview");
       setStatus("");
     } catch (err) {
@@ -696,7 +702,7 @@ export function TripApp() {
               </div>
               {(run.vias?.length ?? 0) > 0 && (
                 <p className="mt-2 text-sm text-[#3d4b63]">
-                  {run.vias?.length} via {run.vias?.length === 1 ? "point" : "points"} on the track
+                  {run.vias?.map((v, n) => v.street || `Waypoint ${n + 1}`).join(", ")}
                 </p>
               )}
               {mapRun === run.id && run.coords.length > 1 && (
@@ -905,7 +911,7 @@ export function TripApp() {
               <ul className="mt-2 space-y-1">
                 {overrides.vias?.map((via, i) => (
                   <li key={`${via.lat.toFixed(5)}-${via.lon.toFixed(5)}-${i}`} className="flex items-center justify-between gap-2 rounded-lg bg-white px-3 py-1">
-                    <span className="text-base">Waypoint {i + 1}</span>
+                    <span className="min-w-0 text-base">Waypoint {i + 1}{via.street ? ` · ${via.street}` : ""}</span>
                     <button
                       type="button"
                       className="h-11 touch-manipulation rounded-lg px-3 text-base text-[#7f1d1d]"
@@ -1096,7 +1102,7 @@ export function TripApp() {
           </p>
           {(overrides.vias?.length ?? 0) > 0 && (
             <p className="text-sm font-medium">
-              This track passes through {overrides.vias?.length} via {overrides.vias?.length === 1 ? "point" : "points"}. The blue {overrides.vias?.length === 1 ? "dot is" : "dots are"} on the map.
+              This track passes through {overrides.vias?.map((v, n) => v.street || `waypoint ${n + 1}`).join(", ")}. The blue {overrides.vias?.length === 1 ? "dot is" : "dots are"} on the map.
             </p>
           )}
           {(overrides.vias?.length ?? 0) > 0 && (

@@ -960,6 +960,7 @@ async function routeFrom(
 
   // A tap that never landed on the street being driven still has to move the track.
   await pullVias(coords, vias, router, (message) => warn("info", 0, 0, message));
+  const viaStreets = (overrides.vias ?? []).map((v) => nearestStreetName(graph, [v.lon, v.lat]));
 
   // Place stops along the finished track.
   const placed = placeStops(sheet, coords, anchors, graph, available, places);
@@ -975,7 +976,22 @@ async function routeFrom(
     turnarounds,
     legs,
     gpx,
+    viaStreets,
   };
+}
+
+/** The named road closest to a tap, so a waypoint can say which street it is on. */
+function nearestStreetName(graph: Graph, point: LonLat, maxM = 400): string {
+  let best: { name: string; d: number } | null = null;
+  for (const edge of graph.edges) {
+    const name = edge.name.trim();
+    if (!name || edge.keys.every((k) => k.startsWith("xlink:"))) continue;
+    for (let i = 1; i < edge.coords.length; i++) {
+      const proj = projectPoint(point, edge.coords[i - 1], edge.coords[i]);
+      if (proj.d <= maxM && (!best || proj.d < best.d)) best = { name, d: proj.d };
+    }
+  }
+  return best?.name ?? "";
 }
 
 /** How close a tap already is to the track before we bend the line out to it. */

@@ -62,5 +62,6 @@ Left Turn Onto BIRCH LN
   assert.equal(result.ok, true, result.ok ? "" : result.error);
   if (!result.ok) return;
   assert.ok(minDistToTrack([via.lon, via.lat], result.coords) < 5);
+  assert.equal(result.viaStreets[0], "Elm Street");
   assert.match(result.warnings.map((w) => w.message).join("\n"), /point you added/);
 });
