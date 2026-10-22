@@ -1,10 +1,9 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
 import { EXAMPLE_SHEET_TEXT } from "@/lib/exampleSheet";
 import { buildDayGpx, runFileName, type DeadheadLeg } from "@/lib/dayPlan";
 import { driveBetween } from "@/lib/engine/drive";
@@ -538,7 +537,7 @@ export function TripApp() {
   }
 
   function onMapClick(lat: number, lon: number) {
-    if (!route || !tapMode) return;
+    if (!route || !tapMode || status) return;
     if (tapMode === "turn" && pick) {
       const next = { ...overrides, turnarounds: { ...overrides.turnarounds, [pick]: { lat, lon } } };
       void generate(next);
@@ -546,7 +545,9 @@ export function TripApp() {
     }
     if (tapMode === "via") {
       const vias = [...(overrides.vias ?? []), { lat, lon }];
-      void generate({ ...overrides, vias });
+      const next = { ...overrides, vias };
+      setOverrides(next);
+      void generate(next);
     }
   }
 
@@ -839,7 +840,7 @@ export function TripApp() {
           </div>}
           <label className="text-sm font-medium">
             Sheet text
-            <Textarea className="mt-1 min-h-36 bg-white font-mono text-sm" value={text} onChange={(e) => setText(e.target.value)} placeholder="Paste the trip sheet, or it will fill in from the photos." />
+            <WrapField className="mt-1 font-mono" multiline value={text} label="Sheet text" placeholder="Paste the trip sheet, or it will fill in from the photos." onChange={setText} />
           </label>
           <div className="flex gap-2">
             <Button type="button" variant="outline" className="h-11 flex-1" onClick={readPasted}>
@@ -863,79 +864,94 @@ export function TripApp() {
           {sheet.stops.length > 0 && (
             <div className="space-y-3">
               <div className="grid grid-cols-2 gap-2">
-                <Input className="h-11 bg-white text-base" value={sheet.route} placeholder="Route" onChange={(e) => setSheet({ ...sheet, route: e.target.value })} />
-                <Input className="h-11 bg-white text-base" value={sheet.run} placeholder="Run" onChange={(e) => setSheet({ ...sheet, run: e.target.value })} />
-                <Input className="col-span-2 h-11 bg-white text-base" value={sheet.description} placeholder="Description" onChange={(e) => setSheet({ ...sheet, description: e.target.value })} />
+                <Input className="h-12 bg-white text-base" value={sheet.route} placeholder="Route" aria-label="Route" onChange={(e) => setSheet({ ...sheet, route: e.target.value })} />
+                <Input className="h-12 bg-white text-base" value={sheet.run} placeholder="Run" aria-label="Run" onChange={(e) => setSheet({ ...sheet, run: e.target.value })} />
               </div>
+              <WrapField
+                value={sheet.description}
+                label="Description"
+                placeholder="Description"
+                onChange={(description) => setSheet({ ...sheet, description })}
+              />
               {sheet.stops.map((stop, si) => {
                 const stopCheck = stopState(stop.description);
                 const sid = `stop-${si}`;
                 return (
                   <div key={si} className="rounded-xl bg-white p-3 ring-1 ring-[#d9d2c3]" data-stop={si}>
-                    <div className="flex flex-wrap gap-2">
-                      <Input className="h-11 w-28 bg-white text-base" value={stop.time} aria-label="Stop time" onChange={(e) => setSheet({ ...sheet, stops: sheet.stops.map((s, i) => (i === si ? { ...s, time: e.target.value } : s)) })} />
-                      <Input
-                        className="h-11 min-w-0 flex-1 bg-white text-base"
-                        value={stop.description}
-                        aria-label="Stop place"
-                        onChange={(e) => setSheet({ ...sheet, stops: sheet.stops.map((s, i) => (i === si ? { ...s, description: e.target.value } : s)) })}
-                        onBlur={() => void recheckSoon()}
-                      />
-                      <StreetMark state={stopCheck.state} open={suggestFor === sid} onTap={() => void tapMark(sid, stopCheck.missing)} />
+                    <div className="mb-2 flex items-center justify-between gap-2">
+                      <p className="text-sm font-semibold">Stop {si + 1}</p>
                       <button
                         type="button"
-                        className="h-11 w-11 touch-manipulation rounded-lg border border-[#d9d2c3] bg-white text-base text-[#7f1d1d]"
+                        className="h-11 touch-manipulation rounded-lg border border-[#d9d2c3] bg-white px-3 text-base text-[#7f1d1d]"
                         aria-label={`Delete stop ${si + 1}`}
                         onClick={() => deleteStop(si)}
                       >
-                        🗑
+                        Delete
                       </button>
-                      {stopCheck.label && <p className="w-full text-xs text-[#15803d]">On the map: {stopCheck.label}</p>}
-                      {suggestFor === sid && (
-                        <SuggestPanel
-                          names={stopCheck.missing}
-                          looking={stopCheck.state === "looking"}
-                          suggest={optionsFor}
-                          onPick={(part, name) => {
-                            setSheet({
-                              ...sheet,
-                              stops: sheet.stops.map((s, i) => (i === si ? { ...s, description: s.description.replace(part, name) } : s)),
-                            });
-                            setSuggestFor(null);
-                          }}
-                        />
-                      )}
                     </div>
+                    <div className="flex items-end gap-2">
+                      <Input className="h-12 w-32 shrink-0 bg-white text-base" value={stop.time} aria-label="Stop time" onChange={(e) => setSheet({ ...sheet, stops: sheet.stops.map((s, i) => (i === si ? { ...s, time: e.target.value } : s)) })} />
+                      <StreetMark state={stopCheck.state} open={suggestFor === sid} onTap={() => void tapMark(sid, stopCheck.missing)} />
+                    </div>
+                    <WrapField
+                      className="mt-2"
+                      value={stop.description}
+                      label="Stop place"
+                      onChange={(description) => setSheet({ ...sheet, stops: sheet.stops.map((s, i) => (i === si ? { ...s, description } : s)) })}
+                      onBlur={() => void recheckSoon()}
+                    />
+                    {stopCheck.label && <p className="mt-1 text-xs text-[#15803d]">On the map: {stopCheck.label}</p>}
+                    {suggestFor === sid && (
+                      <SuggestPanel
+                        names={stopCheck.missing}
+                        looking={stopCheck.state === "looking"}
+                        suggest={optionsFor}
+                        onPick={(part, name) => {
+                          setSheet({
+                            ...sheet,
+                            stops: sheet.stops.map((s, i) => (i === si ? { ...s, description: s.description.replace(part, name) } : s)),
+                          });
+                          setSuggestFor(null);
+                        }}
+                      />
+                    )}
                     <ul className="mt-2 space-y-2">
                       {stop.maneuvers.map((m, mi) => {
                         const st = streetState(m.street);
                         const mid = `${si}-${mi}`;
                         return (
-                          <li key={mi} className="flex flex-wrap gap-2">
-                            <select
-                              className="h-11 rounded-lg border border-[#d9d2c3] bg-white px-2 text-sm"
-                              value={m.kind}
-                              aria-label="Direction"
-                              onChange={(e) => updateManeuver(si, mi, { kind: e.target.value as ManeuverKind })}
-                            >
-                              {KINDS.map((k) => (
-                                <option key={k} value={k}>
-                                  {KIND_LABEL[k]}
-                                </option>
-                              ))}
-                            </select>
-                            <Input
-                              className="h-11 min-w-0 flex-1 bg-white text-base"
+                          <li key={mi} className="rounded-lg bg-[#f6f3ea] p-2">
+                            <div className="flex items-center gap-2">
+                              <select
+                                className="h-12 min-w-0 flex-1 rounded-lg border border-[#d9d2c3] bg-white px-2 text-base"
+                                value={m.kind}
+                                aria-label="Direction"
+                                onChange={(e) => updateManeuver(si, mi, { kind: e.target.value as ManeuverKind })}
+                              >
+                                {KINDS.map((k) => (
+                                  <option key={k} value={k}>
+                                    {KIND_LABEL[k]}
+                                  </option>
+                                ))}
+                              </select>
+                              <StreetMark state={st.state} open={suggestFor === mid} onTap={() => void tapMark(mid, st.state === "found" ? [] : [m.street])} />
+                              <button
+                                type="button"
+                                className="h-12 touch-manipulation rounded-lg border border-[#d9d2c3] bg-white px-3 text-base"
+                                aria-label="Delete this direction"
+                                onClick={() => setSheet({ ...sheet, stops: sheet.stops.map((s, i) => (i === si ? { ...s, maneuvers: s.maneuvers.filter((_, j) => j !== mi) } : s)) })}
+                              >
+                                ✕
+                              </button>
+                            </div>
+                            <WrapField
+                              className="mt-2"
                               value={m.street}
-                              aria-label="Street"
-                              onChange={(e) => updateManeuver(si, mi, { street: e.target.value })}
+                              label="Street"
+                              onChange={(street) => updateManeuver(si, mi, { street })}
                               onBlur={() => void recheckSoon()}
                             />
-                            <StreetMark state={st.state} open={suggestFor === mid} onTap={() => void tapMark(mid, st.state === "found" ? [] : [m.street])} />
-                            <Button type="button" variant="outline" className="h-11" aria-label="Delete this direction" onClick={() => setSheet({ ...sheet, stops: sheet.stops.map((s, i) => (i === si ? { ...s, maneuvers: s.maneuvers.filter((_, j) => j !== mi) } : s)) })}>
-                              ✕
-                            </Button>
-                            {st.label && <p className="w-full text-xs text-[#15803d]">On the map: {st.label}</p>}
+                            {st.label && <p className="mt-1 text-xs text-[#15803d]">On the map: {st.label}</p>}
                             {suggestFor === mid && (
                               <SuggestPanel
                                 names={st.state === "found" ? [] : [m.street]}
@@ -993,41 +1009,48 @@ export function TripApp() {
       )}
 
       {view === "preview" && route && (
-        <section className="flex flex-col gap-3 px-4 py-4 pb-40">
+        <section className="flex flex-col gap-3 px-4 py-4 pb-56">
           <p className="text-lg font-semibold">
             {route.miles.toFixed(2)} miles · {sheet.route} {sheet.run}
           </p>
-          <RouteMap
-            coords={route.coords}
-            stops={previewStops}
-            turnarounds={route.turnarounds}
-            selectedTurnaround={pick}
-            onMapClick={onMapClick}
-          />
+          <div className="relative">
+            <RouteMap
+              coords={route.coords}
+              stops={previewStops}
+              turnarounds={route.turnarounds}
+              vias={overrides.vias ?? []}
+              selectedTurnaround={pick}
+              picking={tapMode === "via"}
+              onMapClick={onMapClick}
+            />
+            {tapMode === "via" && (
+              <p className="pointer-events-none absolute inset-x-2 top-2 rounded-lg bg-[#0f2744] px-3 py-2 text-sm font-medium text-white">
+                Tap the road. A blue dot is a point the track must pass.
+              </p>
+            )}
+          </div>
           <p className="text-sm text-[#3d4b63]">
             {tapMode === "turn" && pick
               ? "Tap the map where the bus actually turns around."
               : tapMode === "via"
-                ? "Tap the map to add a point the track must pass."
+                ? "Each tap adds a blue dot and rebuilds the track through it."
                 : "Orange dots are guessed turnarounds. Move one if the bus turns around somewhere else."}
           </p>
-          <div className="flex gap-2">
-            <Button type="button" variant={tapMode === "via" ? "default" : "outline"} className="h-11 flex-1" onClick={() => setTapMode(tapMode === "via" ? null : "via")}>
-              Add a via point
-            </Button>
+          {(overrides.vias?.length ?? 0) > 0 && (
             <Button
               type="button"
               variant="outline"
-              className="h-11 flex-1"
+              className="h-11"
               onClick={() => {
-                setOverrides({ ...overrides, vias: [] });
-                void generate({ ...overrides, vias: [] });
+                const next = { ...overrides, vias: [] };
+                setOverrides(next);
+                setTapMode(null);
+                void generate(next);
               }}
-              disabled={!overrides.vias?.length}
             >
-              Clear via points
+              Clear {overrides.vias?.length} via {overrides.vias?.length === 1 ? "point" : "points"}
             </Button>
-          </div>
+          )}
           <ul className="space-y-2">
             {route.warnings.map((w, i) => (
               <li key={i} className={`rounded-lg px-3 py-2 text-sm ${w.level === "warn" ? "bg-[#ffedd5]" : "bg-white ring-1 ring-[#d9d2c3]"}`}>
@@ -1058,8 +1081,15 @@ export function TripApp() {
               ))}
             </ul>
           )}
-          <div className="fixed inset-x-0 bottom-0 border-t border-[#d9d2c3] bg-[#f6f3ea] p-3">
+          <div className="fixed inset-x-0 bottom-0 z-30 border-t border-[#d9d2c3] bg-[#f6f3ea] p-3">
             <div className="mx-auto flex max-w-lg flex-col gap-2">
+              <Button
+                type="button"
+                className={`h-12 text-base ${tapMode === "via" ? "bg-[#f5c451] text-[#142033]" : "bg-[#0f2744] text-white"}`}
+                onClick={() => setTapMode(tapMode === "via" ? null : "via")}
+              >
+                {tapMode === "via" ? "Tap the road on the map" : "Add a via point"}
+              </Button>
               <Button type="button" className="h-12 bg-[#0f2744] text-base text-white" onClick={saveToDay}>
                 Add to today’s list
               </Button>
@@ -1090,6 +1120,56 @@ export function TripApp() {
         </section>
       )}
     </main>
+  );
+}
+
+/**
+ * A field that grows with its text. The phone scrolls the page, not the inside
+ * of the box, so a long stop or street can be read and edited in place.
+ */
+function WrapField({
+  value,
+  onChange,
+  onBlur,
+  label,
+  placeholder,
+  multiline = false,
+  className = "",
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  onBlur?: () => void;
+  label: string;
+  placeholder?: string;
+  multiline?: boolean;
+  className?: string;
+}) {
+  const ref = useRef<HTMLTextAreaElement>(null);
+  function fit(el: HTMLTextAreaElement) {
+    el.style.height = "0px";
+    el.style.height = `${el.scrollHeight}px`;
+  }
+  useLayoutEffect(() => {
+    if (ref.current) fit(ref.current);
+  }, [value]);
+  return (
+    <textarea
+      ref={ref}
+      aria-label={label}
+      placeholder={placeholder}
+      rows={multiline ? 6 : 1}
+      value={value}
+      spellCheck={false}
+      autoCorrect="off"
+      autoCapitalize="off"
+      enterKeyHint={multiline ? "enter" : "done"}
+      className={`block w-full resize-none overflow-hidden rounded-lg border border-[#d9d2c3] bg-white px-3 py-2.5 text-base leading-snug break-words whitespace-pre-wrap ${multiline ? "min-h-36" : ""} ${className}`}
+      onChange={(e) => {
+        onChange(multiline ? e.target.value : e.target.value.replace(/\n/g, " "));
+        fit(e.currentTarget);
+      }}
+      onBlur={onBlur}
+    />
   );
 }
 

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { expandPlaceQuery, looksLikePlace, placeName } from "../src/lib/engine/names";
 import { classifyLocation, parseSheet } from "../src/lib/engine/parseSheet";
+import { minDistToTrack } from "../src/lib/engine/geo";
 import { routeSheet } from "../src/lib/engine/route";
 import type { RawLine } from "../src/lib/engine/types";
 
@@ -48,4 +49,18 @@ Left Turn Onto BIRCH LN
   const result = await routeSheet(sheet, { lines, places: [] });
   assert.equal(result.ok, true, result.ok ? "" : result.error);
   if (result.ok) assert.match(result.warnings[0].message, /Couldn't place the first stop/);
+});
+
+test("a via point off the printed line bends the track through that tap", async () => {
+  const sheet = parseSheet(`07:00 AM MAPLE AVE & ELM ST
+Proceed On MAPLE AVE
+Left Turn Onto BIRCH LN
+07:06 AM BIRCH LN & MAPLE AVE`);
+  // North of Maple, far past the old 40 m intersection snap.
+  const via = { lat: 35.808, lon: -78.705 };
+  const result = await routeSheet(sheet, { lines, places: [] }, { vias: [via] });
+  assert.equal(result.ok, true, result.ok ? "" : result.error);
+  if (!result.ok) return;
+  assert.ok(minDistToTrack([via.lon, via.lat], result.coords) < 5);
+  assert.match(result.warnings.map((w) => w.message).join("\n"), /point you added/);
 });
