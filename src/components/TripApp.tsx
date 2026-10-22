@@ -830,13 +830,16 @@ export function TripApp() {
             </div>
           )}
           <div className="fixed inset-x-0 bottom-0 border-t border-[#d9d2c3] bg-[#f6f3ea] p-3">
-            <div className="mx-auto flex max-w-lg gap-2">
-              <Button type="button" variant="outline" className="h-12 flex-1" onClick={() => setView("edit")}>
-                Back
-              </Button>
-              <Button type="button" className="h-12 flex-[2] bg-[#0f2744] text-base text-white" disabled={!!status} onClick={() => void buildAllTrips()}>
-                Build {trips.filter((t) => tripStates[t.key]?.state !== "added").length} trips
-              </Button>
+            <div className="mx-auto flex max-w-lg flex-col gap-2">
+              {status && <p className="text-sm font-medium">{status}</p>}
+              <div className="flex gap-2">
+                <Button type="button" variant="outline" className="h-12 flex-1" onClick={() => setView("edit")}>
+                  Back
+                </Button>
+                <Button type="button" className="h-12 flex-[2] bg-[#0f2744] text-base text-white disabled:opacity-100" disabled={!!status} onClick={() => void buildAllTrips()}>
+                  {status ? "Building…" : `Build ${trips.filter((t) => tripStates[t.key]?.state !== "added").length} trips`}
+                </Button>
+              </div>
             </div>
           </div>
         </section>
@@ -849,7 +852,7 @@ export function TripApp() {
       )}
 
       {view === "edit" && (
-        <section className="flex flex-col gap-3 px-4 py-4 pb-36">
+        <section className="flex flex-col gap-3 px-4 py-4 pb-48">
           {reviewTrip && (
             <div className="rounded-xl bg-white p-3 ring-1 ring-[#d9d2c3]" data-trip-open={reviewTrip.run || reviewTrip.key}>
               <p className="text-lg font-semibold">
@@ -1060,13 +1063,17 @@ export function TripApp() {
             </div>
           )}
           <div className="fixed inset-x-0 bottom-0 border-t border-[#d9d2c3] bg-[#f6f3ea] p-3">
-            <div className="mx-auto flex max-w-lg gap-2">
-              <Button type="button" variant="outline" className="h-12 flex-1" onClick={() => (reviewTrip ? backToTrips() : setView("day"))}>
-                {reviewTrip ? "Back to trips" : "Back"}
-              </Button>
-              <Button type="button" className="h-12 flex-[2] bg-[#0f2744] text-base text-white" disabled={(!sheet.stops.length && !text.trim()) || !!status} onClick={() => void generate()}>
-                Build the route
-              </Button>
+            <div className="mx-auto flex max-w-lg flex-col gap-2">
+              {status && <p className="text-sm font-medium">{status}</p>}
+              {error && <p className="text-sm text-[#7f1d1d]">{error}</p>}
+              <div className="flex gap-2">
+                <Button type="button" variant="outline" className="h-12 flex-1" onClick={() => (reviewTrip ? backToTrips() : setView("day"))}>
+                  {reviewTrip ? "Back to trips" : "Back"}
+                </Button>
+                <Button type="button" className="h-12 flex-[2] bg-[#0f2744] text-base text-white disabled:opacity-100" disabled={(!sheet.stops.length && !text.trim()) || !!status} onClick={() => void generate()}>
+                  {status ? "Building…" : "Build the route"}
+                </Button>
+              </div>
             </div>
           </div>
         </section>
