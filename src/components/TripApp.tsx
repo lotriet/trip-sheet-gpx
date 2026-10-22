@@ -15,6 +15,7 @@ import { loadAround, loadCorridor, loadMap, lookupName, mergeMaps, type MapData 
 import { canonicalKey, looksLikePlace, schoolSig } from "@/lib/engine/names";
 import { matchPlace } from "@/lib/engine/route";
 import { readSheetPhotos } from "@/lib/ocr";
+import { isPdf, pdfToPageImages } from "@/lib/pdfPages";
 import { osrmRouter } from "@/lib/osrm";
 import { RETAKE_MESSAGE } from "@/lib/ocr/quality";
 import { loadDay, saveDay, type SavedRun } from "@/lib/storage";
@@ -101,6 +102,7 @@ export function TripApp() {
   const [reviewKey, setReviewKey] = useState<string | null>(null);
   const [tripEdits, setTripEdits] = useState<Record<string, { text: string; sheet: Sheet; map?: MapData }>>({});
   const [bigThumb, setBigThumb] = useState<string | null>(null);
+  const [mapRun, setMapRun] = useState<string | null>(null);
   const movePanel = useRef<HTMLDivElement>(null);
   // Server render says "Download all"; the phone switches to "Share all" if it can.
   const canShare = useSyncExternalStore(noSubscribe, canShareFiles, () => false);
@@ -312,7 +314,7 @@ export function TripApp() {
     setSheet(parsed.stops.length ? parsed : emptySheet());
     setRoute(null);
     setMapData(null);
-    setOverrides({});
+    setOverrides({ vias: run.vias ?? [] });
     setError("");
     setView("edit");
   }
@@ -356,11 +358,23 @@ export function TripApp() {
   }
 
   async function onPhotos(input: HTMLInputElement) {
-    const files = input.files ? Array.from(input.files) : [];
+    const picked = input.files ? Array.from(input.files) : [];
     // Let the same photo be picked again after a retake.
     input.value = "";
-    if (!files.length) return;
+    if (!picked.length) return;
     setError("");
+    const files: File[] = [];
+    try {
+      for (const file of picked) {
+        if (isPdf(file)) files.push(...(await pdfToPageImages(file, setStatus)));
+        else files.push(file);
+      }
+    } catch (err) {
+      setStatus("");
+      setError(err instanceof Error ? err.message : "Couldn't open that PDF.");
+      return;
+    }
+    if (!files.length) return;
     let results: Awaited<ReturnType<typeof readSheetPhotos>> = [];
     try {
       results = await readSheetPhotos(files, setStatus);
@@ -375,7 +389,7 @@ export function TripApp() {
     const badNote = bad.length
       ? results.length === 1
         ? bad[0].reason
-        : `Couldn't read photo ${bad.map((b) => b.photo + 1).join(", ")} of ${results.length}. ${RETAKE_MESSAGE.replace("Couldn't read this photo. ", "")}`
+        : `Couldn't read ${bad.map((b) => results[b.photo]?.name || `page ${b.photo + 1}`).join(", ")}. ${RETAKE_MESSAGE.replace("Couldn't read this photo. ", "")}`
       : "";
     if (takeText(good, badNote)) return;
     if (good.length) {
@@ -403,7 +417,7 @@ export function TripApp() {
     if (reviewKey === from) setReviewKey(null);
   }
 
-  function savedRunFrom(id: string, sheetText: string, built: Sheet, result: RouteSuccess): SavedRun {
+  function savedRunFrom(id: string, sheetText: string, built: Sheet, result: RouteSuccess, vias: { lat: number; lon: number }[] = []): SavedRun {
     return {
       id,
       area,
@@ -417,6 +431,7 @@ export function TripApp() {
       coords: result.coords,
       stops: result.stops.map((s) => ({ time: s.time, description: s.description, lat: s.lat, lon: s.lon })),
       warnings: result.warnings.map((w) => ({ level: w.level, message: w.message })),
+      vias,
     };
   }
 
@@ -553,7 +568,8 @@ export function TripApp() {
 
   function saveToDay() {
     if (!route) return;
-    const saved = savedRunFrom(editingId ?? newId(), text, sheet, route);
+    const saved = savedRunFrom(editingId ?? newId(), text, sheet, route, overrides.vias ?? []);
+    setMapRun(saved.id);
     if (reviewKey) {
       // Built from the review list: add it to the day by time and go back to the other trips.
       const key = reviewKey;
@@ -648,7 +664,7 @@ export function TripApp() {
             <div className="rounded-xl bg-white p-4 ring-1 ring-[#d9d2c3]">
               <p className="text-lg font-semibold">No runs yet today</p>
               <ol className="mt-2 list-decimal space-y-1 pl-5 text-sm leading-relaxed">
-                <li>Photograph each trip sheet, or paste the text.</li>
+                <li>Photograph each trip sheet, choose a PDF, or paste the text.</li>
                 <li>Fix anything the reader got wrong.</li>
                 <li>Add the run to this list, in the order you drive them.</li>
                 <li>Download one track for the day, or a zip of separate tracks.</li>
@@ -678,11 +694,30 @@ export function TripApp() {
                   </Button>
                 </div>
               </div>
-              <div className="mt-2 flex gap-2">
-                <Button type="button" variant="outline" className="h-10 flex-1" onClick={() => openEdit(run)}>
+              {(run.vias?.length ?? 0) > 0 && (
+                <p className="mt-2 text-sm text-[#3d4b63]">
+                  {run.vias?.length} via {run.vias?.length === 1 ? "point" : "points"} on the track
+                </p>
+              )}
+              {mapRun === run.id && run.coords.length > 1 && (
+                <div className="mt-2">
+                  <RouteMap
+                    coords={run.coords}
+                    stops={run.stops.map((s) => ({ lat: s.lat, lon: s.lon, label: `${s.time} ${s.description}` }))}
+                    turnarounds={[]}
+                    vias={run.vias ?? []}
+                  />
+                  <p className="mt-1 text-sm text-[#3d4b63]">Blue dots are via points. The dark line bends through each one, then returns to the printed streets.</p>
+                </div>
+              )}
+              <div className="mt-2 grid grid-cols-2 gap-2">
+                <Button type="button" variant="outline" className="h-10" onClick={() => setMapRun(mapRun === run.id ? null : run.id)} disabled={run.coords.length < 2}>
+                  {mapRun === run.id ? "Hide map" : "Map"}
+                </Button>
+                <Button type="button" variant="outline" className="h-10" onClick={() => openEdit(run)}>
                   Edit
                 </Button>
-                <Button type="button" variant="outline" className="h-10 flex-1" onClick={() => downloadBlob(runFileName(i, run), new Blob([run.gpx], { type: "application/gpx+xml" }))}>
+                <Button type="button" variant="outline" className="h-10" onClick={() => downloadBlob(runFileName(i, run), new Blob([run.gpx], { type: "application/gpx+xml" }))}>
                   This GPX
                 </Button>
                 <Button type="button" variant="destructive" className="h-10" onClick={() => setRuns((prev) => prev.filter((r) => r.id !== run.id))}>
@@ -834,8 +869,8 @@ export function TripApp() {
               <input className="sr-only" type="file" accept="image/*,.heic,.heif" capture="environment" multiple onChange={(e) => void onPhotos(e.currentTarget)} />
             </label>
             <label className="flex h-12 cursor-pointer items-center justify-center rounded-lg bg-white text-sm font-medium ring-1 ring-[#d9d2c3]">
-              Choose photos
-              <input className="sr-only" type="file" accept="image/*,.heic,.heif" multiple onChange={(e) => void onPhotos(e.currentTarget)} />
+              Photos or PDF
+              <input className="sr-only" type="file" accept="image/*,.heic,.heif,application/pdf,.pdf" multiple onChange={(e) => void onPhotos(e.currentTarget)} />
             </label>
           </div>}
           <label className="text-sm font-medium">
@@ -1033,9 +1068,14 @@ export function TripApp() {
             {tapMode === "turn" && pick
               ? "Tap the map where the bus actually turns around."
               : tapMode === "via"
-                ? "Each tap adds a blue dot and rebuilds the track through it."
-                : "Orange dots are guessed turnarounds. Move one if the bus turns around somewhere else."}
+                ? "Tap the road. A blue dot is added and the track is rebuilt through it."
+                : "A via point pulls the track through a spot you tap. Blue dots stay on the line. Orange dots are guessed turnarounds."}
           </p>
+          {(overrides.vias?.length ?? 0) > 0 && (
+            <p className="text-sm font-medium">
+              This track passes through {overrides.vias?.length} via {overrides.vias?.length === 1 ? "point" : "points"}. The blue {overrides.vias?.length === 1 ? "dot is" : "dots are"} on the map.
+            </p>
+          )}
           {(overrides.vias?.length ?? 0) > 0 && (
             <Button
               type="button"
