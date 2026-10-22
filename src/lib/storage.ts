@@ -18,6 +18,8 @@ export type SavedRun = {
   coords: LonLat[];
   stops: DayStop[];
   warnings: { level: string; message: string }[];
+  /** Taps the track was bent through. Old saved runs omit this. */
+  vias?: { lat: number; lon: number }[];
 };
 
 function openDb(): Promise<IDBDatabase> {
