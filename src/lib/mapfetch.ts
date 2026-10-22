@@ -301,7 +301,9 @@ export async function loadMap(
     if (p) points.push({ lon: p.lon, lat: p.lat });
   }
   const queries = sheetQueries(sheet).filter((q) => !knownSchool(q));
-  for (const q of queries) {
+  for (let i = 0; i < queries.length; i++) {
+    const q = queries[i];
+    onStatus?.(`Finding street ${i + 1} of ${queries.length}…`);
     // Once one stop is found, look for the rest near it, not across the county.
     const anchor = points.length ? middle(points) : null;
     try {
