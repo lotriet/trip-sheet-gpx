@@ -1265,8 +1265,9 @@ export function TripApp() {
           <ul className="space-y-2">
             {route.warnings.map((w, i) => {
               const stop = route.stops.find((s) => s.index === w.stopIndex);
-              const maneuver = sheet.stops[w.stopIndex]?.maneuvers[w.maneuverIndex];
-              const isEditing = warningFix?.stopIndex === w.stopIndex && warningFix.maneuverIndex === w.maneuverIndex;
+              const destinationWarning = w.message.startsWith("Couldn't reach the last stop");
+              const maneuver = destinationWarning ? undefined : sheet.stops[w.stopIndex]?.maneuvers[w.maneuverIndex];
+              const isEditing = w.level === "warn" && warningFix?.stopIndex === w.stopIndex && warningFix.maneuverIndex === w.maneuverIndex;
               return (
                 <li key={`${i}-${w.stopIndex}-${w.maneuverIndex}`} className={`rounded-lg p-3 text-sm ${w.level === "warn" ? "bg-[#ffedd5]" : "bg-white ring-1 ring-[#d9d2c3]"}`}>
                   <p>{w.message}</p>
