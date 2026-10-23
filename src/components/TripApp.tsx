@@ -80,7 +80,10 @@ export function TripApp() {
   const [view, setView] = useState<View>("day");
   const [runs, setRuns] = useState<SavedRun[]>([]);
   const [ready, setReady] = useState(false);
+  const [loadError, setLoadError] = useState(false);
+  const [loadAttempt, setLoadAttempt] = useState(0);
   const [stored, setStored] = useState(true);
+  const saveRevision = useRef(0);
   const [status, setStatus] = useState("");
   const [error, setError] = useState("");
   const [area, setArea] = useState("Wake County, North Carolina");
@@ -279,15 +282,26 @@ export function TripApp() {
 
 
   useEffect(() => {
+    let active = true;
+    setLoadError(false);
     loadDay().then((saved) => {
+      if (!active) return;
       setRuns(saved);
       setReady(true);
+    }).catch(() => {
+      if (active) setLoadError(true);
     });
-  }, []);
+    return () => {
+      active = false;
+    };
+  }, [loadAttempt]);
 
   useEffect(() => {
     if (!ready) return;
-    saveDay(runs).then(setStored);
+    const revision = ++saveRevision.current;
+    saveDay(runs).then((saved) => {
+      if (revision === saveRevision.current) setStored(saved);
+    });
   }, [runs, ready]);
 
   const warnCount = (run: SavedRun) => run.warnings.filter((w) => w.level === "warn").length;
@@ -645,6 +659,28 @@ export function TripApp() {
     [route],
   );
 
+  if (!ready) {
+    return (
+      <main className="mx-auto flex min-h-dvh w-full max-w-lg flex-col bg-[#f6f3ea] text-[#142033]">
+        <header className="border-b border-[#d9d2c3] bg-[#0f2744] px-4 py-4 text-white">
+          <p className="text-xs font-semibold tracking-wide text-[#f5c451]">WCPSS trip sheets</p>
+          <h1 className="text-2xl font-semibold leading-tight">Streets into an OsmAnd track</h1>
+        </header>
+        <section className="m-4 rounded-xl bg-white p-4 ring-1 ring-[#d9d2c3]" aria-live="polite">
+          {loadError ? (
+            <div role="alert">
+              <p className="font-semibold">Couldn’t open today’s saved runs.</p>
+              <p className="mt-1 text-sm">Your saved list has not been replaced. Check storage access and try again.</p>
+              <Button type="button" className="mt-3 h-11 bg-[#0f2744] text-white" onClick={() => setLoadAttempt((n) => n + 1)}>
+                Try again
+              </Button>
+            </div>
+          ) : <p className="text-sm">Opening today’s list…</p>}
+        </section>
+      </main>
+    );
+  }
+
   return (
     <main className="mx-auto flex min-h-dvh w-full max-w-lg flex-col bg-[#f6f3ea] text-[#142033]">
       <header className="border-b border-[#d9d2c3] bg-[#0f2744] px-4 py-4 text-white">
@@ -652,7 +688,7 @@ export function TripApp() {
         <h1 className="text-2xl font-semibold leading-tight">Streets into an OsmAnd track</h1>
         <p className="mt-1 text-sm text-[#d6deea]">
           Photos stay on this phone. Nothing is saved on a server.
-          {stored ? "" : " This browser will forget the day list when you leave."}
+          {stored ? "" : " The day could not be saved; changes may be lost when you leave."}
         </p>
       </header>
 

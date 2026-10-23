@@ -54,6 +54,20 @@ test("joins runs into one track with a marked deadhead and no route element", ()
   assert.equal(gpx.match(/<trkpt /g)?.length, 4);
 });
 
+test("an unrouted deadhead splits the track instead of drawing a straight road", () => {
+  const gpx = buildDayGpx(
+    [
+      { route: "DEMO", description: "OAK", run: "ONE", firstTime: "3:15 PM", coords: [[-78.64, 35.77], [-78.63, 35.78]], stops: [] },
+      { route: "DEMO", description: "OAK", run: "TWO", firstTime: "5:10 PM", coords: [[-78.60, 35.80], [-78.59, 35.81]], stops: [] },
+    ],
+    [{ coords: [[-78.63, 35.78], [-78.60, 35.80]], routed: false }],
+  );
+  assert.equal(gpx.match(/<trkseg>/g)?.length, 2);
+  assert.equal(gpx.match(/<trkpt /g)?.length, 4);
+  assert.match(gpx, /separate segment/);
+  assert.doesNotMatch(gpx, /normal street drive, not a line/);
+});
+
 test("zip stores the gpx names in order", () => {
   const bytes = zipStore([
     { name: "01_SAMPLE_OakAcademy_0315PM.gpx", text: "<gpx></gpx>" },
