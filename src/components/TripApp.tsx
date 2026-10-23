@@ -107,6 +107,8 @@ export function TripApp() {
   const [bigThumb, setBigThumb] = useState<string | null>(null);
   const [mapRun, setMapRun] = useState<string | null>(null);
   const [warningAcknowledged, setWarningAcknowledged] = useState(false);
+  const [mapFocus, setMapFocus] = useState<{ lat: number; lon: number; key: number }>();
+  const mapFocusKey = useRef(0);
   const [exportingDay, setExportingDay] = useState(false);
   const exportLock = useRef(false);
   const movePanel = useRef<HTMLDivElement>(null);
@@ -1162,6 +1164,7 @@ export function TripApp() {
                 const stop = route.stops.find((s) => s.index === w.stopIndex);
                 return stop ? [{ lat: stop.lat, lon: stop.lon, label: `Check stop ${w.stopIndex + 1}` }] : [];
               })}
+              focusPoint={mapFocus}
               vias={overrides.vias ?? []}
               selectedTurnaround={pick}
               picking={tapMode === "via"}
@@ -1173,6 +1176,26 @@ export function TripApp() {
               </p>
             )}
           </div>
+          <details open className="rounded-lg bg-white p-3 ring-1 ring-[#d9d2c3]">
+            <summary className="cursor-pointer text-base font-semibold">Stops and turns · {sheet.stops.length}</summary>
+            <ol className="mt-2 space-y-2">
+              {sheet.stops.map((stop, i) => {
+                const warning = route.warnings.some((w) => w.level === "warn" && w.stopIndex === i);
+                const directions = stop.maneuvers
+                  .filter((m) => m.street.trim())
+                  .map((m) => `${KIND_LABEL[m.kind]} ${m.street}`);
+                return (
+                  <li key={`${stop.time}-${i}`} className={`flex gap-2 rounded-md p-2 text-sm ${warning ? "bg-[#fff7ed] ring-1 ring-[#b91c1c]" : "bg-[#f6f3ea]"}`}>
+                    <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[#0f2744] text-xs font-bold text-white">{i + 1}</span>
+                    <span className="min-w-0">
+                      <span className="font-semibold">{stop.time} · {stop.description || "Stop"}</span>
+                      <span className="block text-[#3d4b63]">{directions.length ? directions.join(" → ") : "No turn listed"}</span>
+                    </span>
+                  </li>
+                );
+              })}
+            </ol>
+          </details>
           <p className="text-sm text-[#3d4b63]">
             {tapMode === "turn" && pick
               ? "Tap the map where the bus actually turns around."
@@ -1201,11 +1224,27 @@ export function TripApp() {
             </Button>
           )}
           <ul className="space-y-2">
-            {route.warnings.map((w, i) => (
-              <li key={i} className={`rounded-lg px-3 py-2 text-sm ${w.level === "warn" ? "bg-[#ffedd5]" : "bg-white ring-1 ring-[#d9d2c3]"}`}>
-                {w.message}
-              </li>
-            ))}
+            {route.warnings.map((w, i) => {
+              const stop = route.stops.find((s) => s.index === w.stopIndex);
+              return (
+                <li key={i}>
+                  {w.level === "warn" && stop ? (
+                    <button
+                      type="button"
+                      className="w-full rounded-lg bg-[#ffedd5] px-3 py-2 text-left text-sm underline decoration-dotted underline-offset-2"
+                      onClick={() => {
+                        setMapFocus({ lat: stop.lat, lon: stop.lon, key: ++mapFocusKey.current });
+                        document.querySelector(".leaflet-container")?.scrollIntoView({ behavior: "smooth", block: "center" });
+                      }}
+                    >
+                      {w.message} · Show stop {w.stopIndex + 1} on map
+                    </button>
+                  ) : (
+                    <p className={`rounded-lg px-3 py-2 text-sm ${w.level === "warn" ? "bg-[#ffedd5]" : "bg-white ring-1 ring-[#d9d2c3]"}`}>{w.message}</p>
+                  )}
+                </li>
+              );
+            })}
           </ul>
           {route.warnings.some((w) => w.level === "warn") && (
             <label className="flex items-start gap-3 rounded-lg border-2 border-[#9a3412] bg-[#fff7ed] p-3 text-sm font-medium">
