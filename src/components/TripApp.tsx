@@ -10,7 +10,7 @@ import { driveBetween } from "@/lib/engine/drive";
 import { buildGpx } from "@/lib/engine/gpx";
 import { classifyLocation, parseSheet } from "@/lib/engine/parseSheet";
 import { routeSheet } from "@/lib/engine/route";
-import type { LonLat, Maneuver, ManeuverKind, RouteOverrides, RouteSuccess, Sheet, TurnaroundPin } from "@/lib/engine/types";
+import type { Maneuver, ManeuverKind, RouteOverrides, RouteSuccess, Sheet, TurnaroundPin } from "@/lib/engine/types";
 import { loadAround, loadCorridor, loadMap, lookupName, mergeMaps, type MapData } from "@/lib/mapfetch";
 import { canonicalKey, looksLikePlace, schoolSig } from "@/lib/engine/names";
 import { matchPlace } from "@/lib/engine/route";
@@ -294,7 +294,6 @@ export function TripApp() {
 
   useEffect(() => {
     let active = true;
-    setLoadError(false);
     loadDay().then((saved) => {
       if (!active) return;
       setRuns(saved);
@@ -742,7 +741,7 @@ export function TripApp() {
             <div role="alert">
               <p className="font-semibold">Couldn’t open today’s saved runs.</p>
               <p className="mt-1 text-sm">Your saved list has not been replaced. Check storage access and try again.</p>
-              <Button type="button" className="mt-3 h-11 bg-[#0f2744] text-white" onClick={() => setLoadAttempt((n) => n + 1)}>
+              <Button type="button" className="mt-3 h-11 bg-[#0f2744] text-white" onClick={() => { setLoadError(false); setLoadAttempt((n) => n + 1); }}>
                 Try again
               </Button>
             </div>
