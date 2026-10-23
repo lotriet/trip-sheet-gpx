@@ -55,6 +55,14 @@ function downloadBlob(name: string, blob: Blob) {
 
 const noSubscribe = () => () => {};
 
+function canOfferHomeScreenInstall() {
+  const isIos = /iPhone|iPad|iPod/.test(navigator.userAgent) ||
+    (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+  const isInstalled = window.matchMedia("(display-mode: standalone)").matches ||
+    ("standalone" in navigator && Boolean((navigator as Navigator & { standalone?: boolean }).standalone));
+  return isIos && !isInstalled;
+}
+
 /** Map data already loaded this session, by area and the sheet's streets. */
 const mapCache = new Map<string, MapData>();
 
@@ -108,6 +116,8 @@ export function TripApp() {
   const [bigThumb, setBigThumb] = useState<string | null>(null);
   const [mapRun, setMapRun] = useState<string | null>(null);
   const [warningAcknowledged, setWarningAcknowledged] = useState(false);
+  const [showInstallHelp, setShowInstallHelp] = useState(false);
+  const offerHomeScreenInstall = useSyncExternalStore(noSubscribe, canOfferHomeScreenInstall, () => false);
   const [warningFix, setWarningFix] = useState<{
     stopIndex: number;
     maneuverIndex: number;
@@ -823,6 +833,29 @@ export function TripApp() {
           Photos and saved runs stay on this phone. Route lookup sends street names and approximate locations to public map and routing services; building a route needs internet. Downloaded GPX files work offline. Check the track against the trip sheet, one-way signs, and bus restrictions before driving.
           {stored ? "" : " The day could not be saved; changes may be lost when you leave."}
         </p>
+        {offerHomeScreenInstall && (
+          <div className="mt-3">
+            <button
+              type="button"
+              className="rounded-lg border border-white/50 px-3 py-2 text-sm font-medium text-white underline underline-offset-2"
+              onClick={() => setShowInstallHelp((open) => !open)}
+              aria-expanded={showInstallHelp}
+            >
+              {showInstallHelp ? "Hide install steps" : "Add this app to your Home Screen"}
+            </button>
+            {showInstallHelp && (
+              <div className="mt-2 rounded-lg bg-white p-3 text-sm leading-relaxed text-[#142033]">
+                <p className="font-semibold">Install on your iPhone</p>
+                <ol className="mt-1 list-decimal space-y-1 pl-5">
+                  <li>Open this page in Safari.</li>
+                  <li>Tap Safari’s Share button (the square with the up arrow).</li>
+                  <li>Scroll down and tap <strong>Add to Home Screen</strong>, then tap <strong>Add</strong>.</li>
+                </ol>
+                <p className="mt-2 text-xs">Your saved trip sheets stay on this phone. The app still needs internet to build routes.</p>
+              </div>
+            )}
+          </div>
+        )}
       </header>
 
       {status && <p className="bg-[#f5c451] px-4 py-2 text-sm font-medium text-[#142033]">{status}</p>}
