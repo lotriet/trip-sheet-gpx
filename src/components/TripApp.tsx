@@ -315,8 +315,6 @@ export function TripApp() {
     });
   }, [runs, ready]);
 
-  const warnCount = (run: SavedRun) => run.warnings.filter((w) => w.level === "warn").length;
-
   function openNew() {
     setEditingId(null);
     setText("");
@@ -818,7 +816,9 @@ export function TripApp() {
               </ol>
             </div>
           )}
-          {runs.map((run, i) => (
+          {runs.map((run, i) => {
+            const warnings = run.warnings.filter((w) => w.level === "warn");
+            return (
             <article key={run.id} className="rounded-xl bg-white p-3 ring-1 ring-[#d9d2c3]">
               <div className="flex items-start justify-between gap-2">
                 <div>
@@ -829,7 +829,6 @@ export function TripApp() {
                   <p className="text-sm">{run.description || "Untitled sheet"}</p>
                   <p className="text-sm text-[#3d4b63]">
                     {run.firstTime} · {run.miles.toFixed(2)} mi
-                    {warnCount(run) > 0 ? ` · ${warnCount(run)} to check` : ""}
                   </p>
                 </div>
                 <div className="flex flex-col gap-1">
@@ -841,6 +840,21 @@ export function TripApp() {
                   </Button>
                 </div>
               </div>
+              {warnings.length > 0 && (
+                <div className="mt-3 rounded-lg border-2 border-[#b91c1c] bg-[#fff7ed] p-3" role="alert">
+                  <p className="text-sm font-bold">Route needs review · {warnings.length} warning{warnings.length === 1 ? "" : "s"}</p>
+                  <p className="mt-1 text-sm">{warnings[0].message}</p>
+                  {warnings.length > 1 && (
+                    <details className="mt-1 text-sm">
+                      <summary className="cursor-pointer font-medium">Show {warnings.length - 1} more</summary>
+                      <ul className="mt-1 list-disc space-y-1 pl-5">
+                        {warnings.slice(1).map((warning, n) => <li key={n}>{warning.message}</li>)}
+                      </ul>
+                    </details>
+                  )}
+                  <Button type="button" variant="outline" className="mt-2 h-10 bg-white" onClick={() => openEdit(run)} disabled={exportingDay}>Review and fix route</Button>
+                </div>
+              )}
               {(run.vias?.length ?? 0) > 0 && (
                 <p className="mt-2 text-sm text-[#3d4b63]">
                   {run.vias?.map((v, n) => v.street || `Waypoint ${n + 1}`).join(", ")}
@@ -872,7 +886,8 @@ export function TripApp() {
                 </Button>
               </div>
             </article>
-          ))}
+            );
+          })}
           <div className="fixed inset-x-0 bottom-0 border-t border-[#d9d2c3] bg-[#f6f3ea] p-3">
             <div className="mx-auto flex max-w-lg flex-col gap-2">
               <Button type="button" className="h-12 bg-[#0f2744] text-base text-white" onClick={openNew} disabled={exportingDay}>
