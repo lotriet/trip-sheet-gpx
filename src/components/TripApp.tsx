@@ -595,7 +595,10 @@ export function TripApp() {
   function editWarning(stopIndex: number, maneuverIndex: number) {
     const maneuver = sheet.stops[stopIndex]?.maneuvers[maneuverIndex];
     if (!maneuver) return;
+    setTapMode(null);
+    setMapFixContext(null);
     setWarningFix({ stopIndex, maneuverIndex, kind: maneuver.kind, street: maneuver.street });
+    requestAnimationFrame(() => document.querySelector(`[data-stop-row="${stopIndex}"]`)?.scrollIntoView({ behavior: "smooth", block: "center" }));
   }
 
   function rebuildWarningFix() {
@@ -629,27 +632,13 @@ export function TripApp() {
           const stop = route.stops.find((s) => s.index === w.stopIndex);
           const destinationWarning = w.message.startsWith("Couldn't reach the last stop");
           const maneuver = destinationWarning ? undefined : sheet.stops[w.stopIndex]?.maneuvers[w.maneuverIndex];
-          const isEditing = w.level === "warn" && warningFix?.stopIndex === w.stopIndex && warningFix.maneuverIndex === w.maneuverIndex;
           return (
             <div key={`${i}-${w.stopIndex}-${w.maneuverIndex}`} className={`rounded-lg p-3 text-sm ${w.level === "warn" ? "bg-[#ffedd5]" : "bg-white ring-1 ring-[#d9d2c3]"}`}>
               <p>{w.message}</p>
               {w.level === "warn" && (
                 <div className="mt-2 flex flex-wrap gap-2">
                   {stop && <Button type="button" variant="outline" className="h-10 bg-white" onClick={() => focusWarning(w.stopIndex, w.message, maneuver?.street)}>Guide on map</Button>}
-                  {maneuver && <Button type="button" variant="outline" className="h-10 bg-white" onClick={() => isEditing ? setWarningFix(null) : editWarning(w.stopIndex, w.maneuverIndex)}>{isEditing ? "Close edit" : "Quick fix"}</Button>}
-                </div>
-              )}
-              {isEditing && warningFix && (
-                <div className="mt-3 space-y-2 rounded-md bg-white p-3 ring-1 ring-[#d9d2c3]">
-                  <label className="block text-xs font-semibold" htmlFor={`fix-kind-${i}`}>Direction</label>
-                  <select id={`fix-kind-${i}`} className="h-11 w-full rounded-md border border-[#d9d2c3] bg-white px-3 text-base" value={warningFix.kind} onChange={(e) => setWarningFix({ ...warningFix, kind: e.target.value as ManeuverKind })}>
-                    {KINDS.map((kind) => <option key={kind} value={kind}>{KIND_LABEL[kind]}</option>)}
-                  </select>
-                  <Input aria-label="Correct street name" value={warningFix.street} onChange={(e) => setWarningFix({ ...warningFix, street: e.target.value })} placeholder="Street name from the trip sheet" />
-                  <div className="flex gap-2">
-                    <Button type="button" variant="outline" className="h-10 flex-1" onClick={() => setWarningFix(null)}>Cancel</Button>
-                    <Button type="button" className="h-10 flex-1 bg-[#0f2744] text-white" disabled={!warningFix.street.trim() || !!status} onClick={rebuildWarningFix}>Save and rebuild</Button>
-                  </div>
+                  {maneuver && <Button type="button" variant="outline" className="h-10 bg-white" onClick={() => editWarning(w.stopIndex, w.maneuverIndex)}>Edit direction</Button>}
                 </div>
               )}
             </div>
@@ -1291,13 +1280,39 @@ export function TripApp() {
                 const directions = stop.maneuvers
                   .filter((m) => m.street.trim())
                   .map((m) => `${KIND_LABEL[m.kind]} ${m.street}`);
+                const stopWarning = route.warnings.find((w) => w.level === "warn" && w.stopIndex === i);
+                const warningManeuver = stopWarning && !stopWarning.message.startsWith("Couldn't reach the last stop")
+                  ? sheet.stops[i]?.maneuvers[stopWarning.maneuverIndex]
+                  : undefined;
+                const editingStop = warningFix?.stopIndex === i;
                 return (
-                  <li key={`${stop.time}-${i}`} className={`flex gap-2 rounded-md p-2 text-sm ${warning ? "bg-[#fff7ed] ring-1 ring-[#b91c1c]" : "bg-[#f6f3ea]"}`}>
-                    <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[#0f2744] text-xs font-bold text-white">{i + 1}</span>
-                    <span className="min-w-0">
-                      <span className="font-semibold">{stop.time} · {stop.description || "Stop"}</span>
-                      <span className="block text-[#3d4b63]">{directions.length ? directions.join(" → ") : "No turn listed"}</span>
-                    </span>
+                  <li key={`${stop.time}-${i}`} data-stop-row={i} className={`rounded-md p-2 text-sm ${warning ? "bg-[#fff7ed] ring-2 ring-[#b91c1c]" : "bg-[#f6f3ea]"}`}>
+                    <div className="flex gap-2">
+                      <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[#0f2744] text-xs font-bold text-white">{i + 1}</span>
+                      <span className="min-w-0">
+                        <span className="font-semibold">{stop.time} · {stop.description || "Stop"}</span>
+                        <span className="block text-[#3d4b63]">{directions.length ? directions.join(" → ") : "No turn listed"}</span>
+                      </span>
+                    </div>
+                    {warning && stopWarning && (
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        {warningManeuver && <Button type="button" variant="outline" className="h-10 bg-white" onClick={() => editWarning(i, stopWarning.maneuverIndex)}>Edit direction</Button>}
+                        <Button type="button" variant="outline" className="h-10 bg-white" onClick={() => focusWarning(i, stopWarning.message, warningManeuver?.street)}>Guide on map</Button>
+                      </div>
+                    )}
+                    {editingStop && warningFix && (
+                      <div className="mt-3 space-y-2 rounded-md bg-white p-3 ring-1 ring-[#d9d2c3]">
+                        <p className="text-xs font-semibold">Edit this direction from the trip sheet:</p>
+                        <select className="h-11 w-full rounded-md border border-[#d9d2c3] bg-white px-3 text-base" aria-label="Direction" value={warningFix.kind} onChange={(e) => setWarningFix({ ...warningFix, kind: e.target.value as ManeuverKind })}>
+                          {KINDS.map((kind) => <option key={kind} value={kind}>{KIND_LABEL[kind]}</option>)}
+                        </select>
+                        <Input aria-label="Correct street name" value={warningFix.street} onChange={(e) => setWarningFix({ ...warningFix, street: e.target.value })} placeholder="Street name from the trip sheet" />
+                        <div className="flex gap-2">
+                          <Button type="button" variant="outline" className="h-10 flex-1" onClick={() => setWarningFix(null)}>Cancel</Button>
+                          <Button type="button" className="h-10 flex-1 bg-[#0f2744] text-white" disabled={!warningFix.street.trim() || !!status} onClick={rebuildWarningFix}>Save and rebuild</Button>
+                        </div>
+                      </div>
+                    )}
                   </li>
                 );
               })}
