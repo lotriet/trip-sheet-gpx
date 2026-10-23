@@ -115,6 +115,8 @@ test("each run's GPX is a track with stop waypoints and no route element", () =>
   assert.match(gpx, /<trk>[\s\S]*<trkseg>[\s\S]*<trkpt [\s\S]*<\/trkseg><\/trk>/);
   assert.equal((gpx.match(/<wpt /g) ?? []).length, 2);
   assert.doesNotMatch(gpx, /<rte/);
+  assert.match(gpx, /One-way directions may be missing/);
+  assert.match(gpx, /Bus restrictions are not checked/);
 });
 
 /** The same pipeline the app runs on photos or pasted text. */
