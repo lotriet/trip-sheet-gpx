@@ -107,6 +107,12 @@ export function TripApp() {
   const [bigThumb, setBigThumb] = useState<string | null>(null);
   const [mapRun, setMapRun] = useState<string | null>(null);
   const [warningAcknowledged, setWarningAcknowledged] = useState(false);
+  const [warningFix, setWarningFix] = useState<{
+    stopIndex: number;
+    maneuverIndex: number;
+    kind: ManeuverKind;
+    street: string;
+  } | null>(null);
   const [mapFocus, setMapFocus] = useState<{ lat: number; lon: number; key: number }>();
   const mapFocusKey = useRef(0);
   const [exportingDay, setExportingDay] = useState(false);
@@ -533,9 +539,9 @@ export function TripApp() {
     });
   }
 
-  async function generate(nextOverrides = overrides) {
+  async function generate(nextOverrides = overrides, requestedSheet = sheet) {
     setError("");
-    let current = sheet;
+    let current = requestedSheet;
     if (!current.stops.length && text.trim()) {
       // Pasted text that was never read: read it now.
       const parsed = parseSheet(text);
@@ -575,6 +581,39 @@ export function TripApp() {
       setError(err instanceof Error ? err.message : "The route could not be built.");
       setStatus("");
     }
+  }
+
+  function focusWarning(stopIndex: number) {
+    const stop = route?.stops.find((s) => s.index === stopIndex);
+    if (!stop) return;
+    setMapFocus({ lat: stop.lat, lon: stop.lon, key: ++mapFocusKey.current });
+    setTapMode("via");
+    document.querySelector(".leaflet-container")?.scrollIntoView({ behavior: "smooth", block: "center" });
+  }
+
+  function editWarning(stopIndex: number, maneuverIndex: number) {
+    const maneuver = sheet.stops[stopIndex]?.maneuvers[maneuverIndex];
+    if (!maneuver) return;
+    setWarningFix({ stopIndex, maneuverIndex, kind: maneuver.kind, street: maneuver.street });
+  }
+
+  function rebuildWarningFix() {
+    if (!warningFix) return;
+    const nextSheet: Sheet = {
+      ...sheet,
+      stops: sheet.stops.map((stop, si) => si !== warningFix.stopIndex ? stop : {
+        ...stop,
+        maneuvers: stop.maneuvers.map((maneuver, mi) => mi !== warningFix.maneuverIndex ? maneuver : {
+          ...maneuver,
+          kind: warningFix.kind,
+          street: warningFix.street.trim(),
+        }),
+      }),
+    };
+    setSheet(nextSheet);
+    setWarningFix(null);
+    setTapMode(null);
+    void generate(overrides, nextSheet);
   }
 
   function onMapClick(lat: number, lon: number) {
@@ -1226,21 +1265,29 @@ export function TripApp() {
           <ul className="space-y-2">
             {route.warnings.map((w, i) => {
               const stop = route.stops.find((s) => s.index === w.stopIndex);
+              const maneuver = sheet.stops[w.stopIndex]?.maneuvers[w.maneuverIndex];
+              const isEditing = warningFix?.stopIndex === w.stopIndex && warningFix.maneuverIndex === w.maneuverIndex;
               return (
-                <li key={i}>
-                  {w.level === "warn" && stop ? (
-                    <button
-                      type="button"
-                      className="w-full rounded-lg bg-[#ffedd5] px-3 py-2 text-left text-sm underline decoration-dotted underline-offset-2"
-                      onClick={() => {
-                        setMapFocus({ lat: stop.lat, lon: stop.lon, key: ++mapFocusKey.current });
-                        document.querySelector(".leaflet-container")?.scrollIntoView({ behavior: "smooth", block: "center" });
-                      }}
-                    >
-                      {w.message} · Show stop {w.stopIndex + 1} on map
-                    </button>
-                  ) : (
-                    <p className={`rounded-lg px-3 py-2 text-sm ${w.level === "warn" ? "bg-[#ffedd5]" : "bg-white ring-1 ring-[#d9d2c3]"}`}>{w.message}</p>
+                <li key={`${i}-${w.stopIndex}-${w.maneuverIndex}`} className={`rounded-lg p-3 text-sm ${w.level === "warn" ? "bg-[#ffedd5]" : "bg-white ring-1 ring-[#d9d2c3]"}`}>
+                  <p>{w.message}</p>
+                  {w.level === "warn" && (
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      {stop && <Button type="button" variant="outline" className="h-10 bg-white" onClick={() => focusWarning(w.stopIndex)}>Guide on map</Button>}
+                      {maneuver && <Button type="button" variant="outline" className="h-10 bg-white" onClick={() => isEditing ? setWarningFix(null) : editWarning(w.stopIndex, w.maneuverIndex)}>{isEditing ? "Close edit" : "Quick fix"}</Button>}
+                    </div>
+                  )}
+                  {isEditing && warningFix && (
+                    <div className="mt-3 space-y-2 rounded-md bg-white p-3 ring-1 ring-[#d9d2c3]">
+                      <label className="block text-xs font-semibold" htmlFor={`fix-kind-${i}`}>Direction</label>
+                      <select id={`fix-kind-${i}`} className="h-11 w-full rounded-md border border-[#d9d2c3] bg-white px-3 text-base" value={warningFix.kind} onChange={(e) => setWarningFix({ ...warningFix, kind: e.target.value as ManeuverKind })}>
+                        {KINDS.map((kind) => <option key={kind} value={kind}>{KIND_LABEL[kind]}</option>)}
+                      </select>
+                      <Input aria-label="Correct street name" value={warningFix.street} onChange={(e) => setWarningFix({ ...warningFix, street: e.target.value })} placeholder="Street name from the trip sheet" />
+                      <div className="flex gap-2">
+                        <Button type="button" variant="outline" className="h-10 flex-1" onClick={() => setWarningFix(null)}>Cancel</Button>
+                        <Button type="button" className="h-10 flex-1 bg-[#0f2744] text-white" disabled={!warningFix.street.trim() || !!status} onClick={rebuildWarningFix}>Save and rebuild</Button>
+                      </div>
+                    </div>
                   )}
                 </li>
               );
