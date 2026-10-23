@@ -42,6 +42,7 @@ export default function RouteMap({
   stops,
   turnarounds,
   vias = [],
+  warningStops = [],
   selectedTurnaround,
   picking = false,
   onMapClick,
@@ -50,6 +51,7 @@ export default function RouteMap({
   stops: StopPin[];
   turnarounds: TurnaroundPin[];
   vias?: { lat: number; lon: number }[];
+  warningStops?: StopPin[];
   selectedTurnaround?: string | null;
   /** The next tap should add a via, so the map takes the touch instead of the page. */
   picking?: boolean;
@@ -71,6 +73,9 @@ export default function RouteMap({
       )}
       {stops.map((s, i) => (
         <Marker key={`${s.lat}-${s.lon}-${i}`} position={[s.lat, s.lon]} icon={numberIcon(i + 1)} title={s.label} />
+      ))}
+      {warningStops.map((s, i) => (
+        <CircleMarker key={`warning-${i}-${s.lat}-${s.lon}`} center={[s.lat, s.lon]} radius={17} pathOptions={{ color: "#b91c1c", fillColor: "#ef4444", fillOpacity: 0.18, weight: 4 }} />
       ))}
       {vias.map((v, i) => (
         <CircleMarker
