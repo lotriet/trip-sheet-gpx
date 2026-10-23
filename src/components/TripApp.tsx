@@ -687,7 +687,7 @@ export function TripApp() {
         <p className="text-xs font-semibold tracking-wide text-[#f5c451]">WCPSS trip sheets</p>
         <h1 className="text-2xl font-semibold leading-tight">Streets into an OsmAnd track</h1>
         <p className="mt-1 text-sm text-[#d6deea]">
-          Photos stay on this phone. Nothing is saved on a server.
+          Photos and saved runs stay on this phone. Route lookup sends street names and approximate locations to public map and routing services; building a route needs internet. Downloaded GPX files work offline. Check the track against the trip sheet, one-way signs, and bus restrictions before driving.
           {stored ? "" : " The day could not be saved; changes may be lost when you leave."}
         </p>
       </header>
@@ -1119,6 +1119,9 @@ export function TripApp() {
         <section className="flex flex-col gap-3 px-4 py-4 pb-56">
           <p className="text-lg font-semibold">
             {route.miles.toFixed(2)} miles · {sheet.route} {sheet.run}
+          </p>
+          <p className="rounded-lg bg-[#ffedd5] px-3 py-2 text-sm text-[#142033]">
+            Check this track before driving. One-way directions and bus restrictions may be missing from map data; turnaround points are estimates. Follow the trip sheet and road signs.
           </p>
           <div className="relative">
             <RouteMap

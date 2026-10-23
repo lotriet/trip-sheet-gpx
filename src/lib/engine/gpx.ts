@@ -66,7 +66,7 @@ export function buildGpx(sheet: Sheet, track: LonLat[], stops: PlacedStop[]): st
     .filter(Boolean);
   const title = titleBits.join(" ") || "School bus run";
   const meta =
-    "Trip-sheet street sequence (not optimized). Built from OpenStreetMap data. Bus restrictions are not checked; the trip sheet governs. Turnaround spots are estimated.";
+    "Trip-sheet street sequence (not optimized). Built from OpenStreetMap data. One-way directions may be missing from named-road map data. Bus restrictions are not checked; follow the trip sheet and road signs. Turnaround spots are estimated.";
 
   const lines: string[] = [
     `<?xml version="1.0" encoding="UTF-8"?>`,
