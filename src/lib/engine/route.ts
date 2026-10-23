@@ -890,6 +890,7 @@ async function routeFrom(
     } else {
       const dir = maneuver.kind;
       const sameCorner = skipTurnAt != null && node.id === skipTurnAt;
+      let usedClosestConnection = false;
       if (currentKey && currentKey !== target.key && (sameCorner || !canTurn(node, heading, target.key, dir, graph))) {
         if (currentKey) hopVias(currentKey);
         const loose = travel(currentKey, { type: "turn", key: target.key, dir }, sameCorner ? 45 : 12);
@@ -898,7 +899,7 @@ async function routeFrom(
           node = loose.node;
           heading = loose.heading;
           if (!loose.matched) {
-            warn("warn", stopIndex, maneuverIndex, `The ${dir} turn onto ${maneuver.street} did not match a clear intersection. The track uses the closest connection.`);
+            usedClosestConnection = true;
           }
         } else if (target.how !== "missing" && !(await jumpTo(target.key, maneuver.street, stopIndex, maneuverIndex))) {
           warn("warn", stopIndex, maneuverIndex, `Couldn't follow the sheet onto ${maneuver.street}.`);
@@ -912,7 +913,10 @@ async function routeFrom(
           heading = arrivalHeading(turn.edge.coords);
           currentKey = target.key;
           skipTurnAt = node.id;
-          if (!turn.matched && !roughHeading) {
+          if (usedClosestConnection && !turn.matched) {
+            warn("warn", stopIndex, maneuverIndex, `The ${dir} turn onto ${maneuver.street} could not be confirmed at a clear intersection. The track uses the closest connection. Check it against the sheet.`);
+          }
+          if (!turn.matched && !roughHeading && !usedClosestConnection) {
             // Nearly straight on: the street changes its name here, or the road
             // bends into the turn before the junction. The track is still on
             // the named street, so it's a note, not a problem.
@@ -928,7 +932,9 @@ async function routeFrom(
           }
           roughHeading = false;
         } else if (!warnings.some((w) => w.stopIndex === stopIndex && w.maneuverIndex === maneuverIndex)) {
-          warn("warn", stopIndex, maneuverIndex, `No connection found for the ${dir} turn onto ${maneuver.street}.`);
+          warn("warn", stopIndex, maneuverIndex, usedClosestConnection
+            ? `The ${dir} turn onto ${maneuver.street} could not be confirmed at a clear intersection. The track uses the closest connection. Check it against the sheet.`
+            : `No connection found for the ${dir} turn onto ${maneuver.street}.`);
         }
       }
     }

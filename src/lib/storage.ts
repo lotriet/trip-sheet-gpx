@@ -17,7 +17,7 @@ export type SavedRun = {
   gpx: string;
   coords: LonLat[];
   stops: DayStop[];
-  warnings: { level: string; message: string }[];
+  warnings: { level: "info" | "warn"; message: string; stopIndex?: number; maneuverIndex?: number }[];
   /** Taps the track was bent through. Old saved runs omit this. */
   vias?: { lat: number; lon: number; street?: string }[];
 };

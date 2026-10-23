@@ -10,7 +10,7 @@ import { driveBetween } from "@/lib/engine/drive";
 import { buildGpx } from "@/lib/engine/gpx";
 import { classifyLocation, parseSheet } from "@/lib/engine/parseSheet";
 import { routeSheet } from "@/lib/engine/route";
-import type { Maneuver, ManeuverKind, RouteOverrides, RouteSuccess, Sheet, TurnaroundPin } from "@/lib/engine/types";
+import type { Maneuver, ManeuverKind, RouteOverrides, RouteSuccess, Sheet, TurnaroundPin, Warning } from "@/lib/engine/types";
 import { loadAround, loadCorridor, loadMap, lookupName, mergeMaps, type MapData } from "@/lib/mapfetch";
 import { canonicalKey, looksLikePlace, schoolSig } from "@/lib/engine/names";
 import { matchPlace } from "@/lib/engine/route";
@@ -93,6 +93,7 @@ export function TripApp() {
   const [mapData, setMapData] = useState<MapData | null>(null);
   const [loadedArea, setLoadedArea] = useState("");
   const [route, setRoute] = useState<RouteSuccess | null>(null);
+  const [editWarnings, setEditWarnings] = useState<Warning[]>([]);
   const [overrides, setOverrides] = useState<RouteOverrides>({});
   const [pick, setPick] = useState<string | null>(null);
   const [tapMode, setTapMode] = useState<"turn" | "via" | null>(null);
@@ -320,6 +321,7 @@ export function TripApp() {
     setText("");
     setSheet(emptySheet());
     setRoute(null);
+    setEditWarnings([]);
     setMapData(null);
     setOverrides({});
     setPick(null);
@@ -336,6 +338,17 @@ export function TripApp() {
     const parsed = parseSheet(run.sheetText);
     setSheet(parsed.stops.length ? parsed : emptySheet());
     setRoute(null);
+    setEditWarnings((run.warnings ?? []).flatMap((w) => {
+      if (w.level !== "warn") return [];
+      if (typeof w.stopIndex === "number" && typeof w.maneuverIndex === "number") {
+        return [{ level: "warn" as const, stopIndex: w.stopIndex, maneuverIndex: w.maneuverIndex, message: w.message }];
+      }
+      // Older saved runs stored the warning text without its direction indexes.
+      const needle = w.message.toLocaleLowerCase();
+      const match = parsed.stops.flatMap((stop, stopIndex) => stop.maneuvers.map((maneuver, maneuverIndex) => ({ stopIndex, maneuverIndex, street: maneuver.street })))
+        .find((item) => item.street.trim() && needle.includes(item.street.trim().toLocaleLowerCase()));
+      return match ? [{ level: "warn" as const, stopIndex: match.stopIndex, maneuverIndex: match.maneuverIndex, message: w.message }] : [];
+    }));
     setMapData(null);
     setOverrides({ vias: run.vias ?? [] });
     setError("");
@@ -453,7 +466,7 @@ export function TripApp() {
       gpx: result.gpx,
       coords: result.coords,
       stops: result.stops.map((s) => ({ time: s.time, description: s.description, lat: s.lat, lon: s.lon })),
-      warnings: result.warnings.map((w) => ({ level: w.level, message: w.message })),
+      warnings: result.warnings.map((w) => ({ ...w })),
       vias,
     };
   }
@@ -1014,7 +1027,7 @@ export function TripApp() {
               <p className="text-lg font-semibold">
                 Run {reviewTrip.run || "?"} · {reviewTrip.pages.length === 1 ? "1 page" : `${reviewTrip.pages.length} pages`}
               </p>
-              <p className="text-sm text-[#3d4b63]">Check the streets: a red ? means the map doesn’t know that name. Tap it for close matches.</p>
+              <p className="text-sm text-[#3d4b63]">Street checks confirm the name is on the map. Route warnings below flag turn connections. Tap a red ? for close matches.</p>
               <PageThumbs pages={reviewTrip.pages} onOpen={setBigThumb} />
             </div>
           )}
@@ -1023,6 +1036,11 @@ export function TripApp() {
             Area
             <Input className="mt-1 h-12 bg-white text-base" value={area} onChange={(e) => setArea(e.target.value)} />
           </label>
+          {editWarnings.length > 0 && (
+            <p className="rounded-lg border border-[#b93816] bg-[#fff7ed] px-3 py-2 text-sm text-[#7f1d1d]">
+              A green street check confirms the name exists on the map. The route warning below means the turn connection needs review.
+            </p>
+          )}
           {!reviewTrip && pages.length > 0 && trips.length > 1 && (
             <Button type="button" variant="outline" className="h-11" onClick={() => setView("review")}>
               Back to the {trips.length} trips found
@@ -1175,6 +1193,11 @@ export function TripApp() {
                               onBlur={() => void recheckSoon()}
                             />
                             {st.label && <p className="mt-1 text-xs text-[#15803d]">On the map: {st.label}</p>}
+                            {editWarnings.filter((w) => w.stopIndex === si && w.maneuverIndex === mi).map((w, wi) => (
+                              <p key={`route-warning-${wi}`} role="alert" className="mt-2 rounded-md border border-[#f0c36d] bg-[#ffedd5] p-2 text-sm text-[#7f1d1d]">
+                                Route warning: {w.message}
+                              </p>
+                            ))}
                             {suggestFor === mid && (
                               <SuggestPanel
                                 names={st.state === "found" ? [] : [m.street]}
