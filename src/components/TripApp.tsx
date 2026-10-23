@@ -114,6 +114,7 @@ export function TripApp() {
     street: string;
   } | null>(null);
   const [mapFocus, setMapFocus] = useState<{ lat: number; lon: number; key: number }>();
+  const [mapFixContext, setMapFixContext] = useState<{ stopIndex: number; message: string } | null>(null);
   const mapFocusKey = useRef(0);
   const [exportingDay, setExportingDay] = useState(false);
   const exportLock = useRef(false);
@@ -582,10 +583,11 @@ export function TripApp() {
     }
   }
 
-  function focusWarning(stopIndex: number) {
+  function focusWarning(stopIndex: number, message: string) {
     const stop = route?.stops.find((s) => s.index === stopIndex);
     if (!stop) return;
     setMapFocus({ lat: stop.lat, lon: stop.lon, key: ++mapFocusKey.current });
+    setMapFixContext({ stopIndex, message });
     setTapMode("via");
     document.querySelector(".leaflet-container")?.scrollIntoView({ behavior: "smooth", block: "center" });
   }
@@ -612,7 +614,49 @@ export function TripApp() {
     setSheet(nextSheet);
     setWarningFix(null);
     setTapMode(null);
+    setMapFixContext(null);
     void generate(overrides, nextSheet);
+  }
+
+  function renderWarnings() {
+    if (!route) return null;
+    return (
+      <section aria-label="Route issues" className="space-y-2">
+        {route.warnings.some((w) => w.level === "warn") && (
+          <p className="text-sm font-semibold">Fix a direction, or guide the route on the map:</p>
+        )}
+        {route.warnings.map((w, i) => {
+          const stop = route.stops.find((s) => s.index === w.stopIndex);
+          const destinationWarning = w.message.startsWith("Couldn't reach the last stop");
+          const maneuver = destinationWarning ? undefined : sheet.stops[w.stopIndex]?.maneuvers[w.maneuverIndex];
+          const isEditing = w.level === "warn" && warningFix?.stopIndex === w.stopIndex && warningFix.maneuverIndex === w.maneuverIndex;
+          return (
+            <div key={`${i}-${w.stopIndex}-${w.maneuverIndex}`} className={`rounded-lg p-3 text-sm ${w.level === "warn" ? "bg-[#ffedd5]" : "bg-white ring-1 ring-[#d9d2c3]"}`}>
+              <p>{w.message}</p>
+              {w.level === "warn" && (
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {stop && <Button type="button" variant="outline" className="h-10 bg-white" onClick={() => focusWarning(w.stopIndex, w.message)}>Guide on map</Button>}
+                  {maneuver && <Button type="button" variant="outline" className="h-10 bg-white" onClick={() => isEditing ? setWarningFix(null) : editWarning(w.stopIndex, w.maneuverIndex)}>{isEditing ? "Close edit" : "Quick fix"}</Button>}
+                </div>
+              )}
+              {isEditing && warningFix && (
+                <div className="mt-3 space-y-2 rounded-md bg-white p-3 ring-1 ring-[#d9d2c3]">
+                  <label className="block text-xs font-semibold" htmlFor={`fix-kind-${i}`}>Direction</label>
+                  <select id={`fix-kind-${i}`} className="h-11 w-full rounded-md border border-[#d9d2c3] bg-white px-3 text-base" value={warningFix.kind} onChange={(e) => setWarningFix({ ...warningFix, kind: e.target.value as ManeuverKind })}>
+                    {KINDS.map((kind) => <option key={kind} value={kind}>{KIND_LABEL[kind]}</option>)}
+                  </select>
+                  <Input aria-label="Correct street name" value={warningFix.street} onChange={(e) => setWarningFix({ ...warningFix, street: e.target.value })} placeholder="Street name from the trip sheet" />
+                  <div className="flex gap-2">
+                    <Button type="button" variant="outline" className="h-10 flex-1" onClick={() => setWarningFix(null)}>Cancel</Button>
+                    <Button type="button" className="h-10 flex-1 bg-[#0f2744] text-white" disabled={!warningFix.street.trim() || !!status} onClick={rebuildWarningFix}>Save and rebuild</Button>
+                  </div>
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </section>
+    );
   }
 
   function onMapClick(lat: number, lon: number) {
@@ -626,6 +670,8 @@ export function TripApp() {
       const vias = [...(overrides.vias ?? []), { lat, lon }];
       const next = { ...overrides, vias };
       setOverrides(next);
+      setTapMode(null);
+      setMapFixContext(null);
       void generate(next);
     }
   }
@@ -1193,6 +1239,30 @@ export function TripApp() {
           <p className="rounded-lg bg-[#ffedd5] px-3 py-2 text-sm text-[#142033]">
             Check this track before driving. One-way directions and bus restrictions may be missing from map data; turnaround points are estimates. Follow the trip sheet and road signs.
           </p>
+          {renderWarnings()}
+          {route.warnings.some((w) => w.level === "warn") && (
+            <label className="flex items-start gap-3 rounded-lg border-2 border-[#9a3412] bg-[#fff7ed] p-3 text-sm font-medium">
+              <input
+                type="checkbox"
+                className="mt-1 h-5 w-5 shrink-0 accent-[#0f2744]"
+                checked={warningAcknowledged}
+                onChange={(e) => setWarningAcknowledged(e.target.checked)}
+              />
+              <span>I checked each warning against the trip sheet and road layout.</span>
+            </label>
+          )}
+          {tapMode === "via" && (
+            <div className="rounded-lg border-2 border-[#0f2744] bg-white p-3 text-sm" role="status">
+              {mapFixContext ? (
+                <>
+                  <p className="font-bold">Guiding stop {mapFixContext.stopIndex + 1} on the map</p>
+                  <p className="mt-1">{mapFixContext.message}</p>
+                </>
+              ) : <p className="font-bold">Add a point the route must pass.</p>}
+              <p className="mt-1">Tap the road the bus should use near this stop. A blue dot will appear and the route will rebuild.</p>
+              <Button type="button" variant="outline" className="mt-2 h-10" onClick={() => { setTapMode(null); setMapFixContext(null); }}>Cancel</Button>
+            </div>
+          )}
           <div className="relative">
             <RouteMap
               coords={route.coords}
@@ -1208,11 +1278,6 @@ export function TripApp() {
               picking={tapMode === "via"}
               onMapClick={onMapClick}
             />
-            {tapMode === "via" && (
-              <p className="pointer-events-none absolute inset-x-2 top-2 rounded-lg bg-[#0f2744] px-3 py-2 text-sm font-medium text-white">
-                Tap the road. A blue dot is a point the track must pass.
-              </p>
-            )}
           </div>
           <details open className="rounded-lg bg-white p-3 ring-1 ring-[#d9d2c3]">
             <summary className="cursor-pointer text-base font-semibold">Stops and turns · {sheet.stops.length}</summary>
@@ -1234,13 +1299,7 @@ export function TripApp() {
               })}
             </ol>
           </details>
-          <p className="text-sm text-[#3d4b63]">
-            {tapMode === "turn" && pick
-              ? "Tap the map where the bus actually turns around."
-              : tapMode === "via"
-                ? "Tap the road. A blue dot is added and the track is rebuilt through it."
-                : "A via point pulls the track through a spot you tap. Blue dots stay on the line. Orange dots are guessed turnarounds."}
-          </p>
+          <p className="text-sm text-[#3d4b63]">Blue dots are required route points. Orange dots are estimated turnarounds. Tap a warning above to fix a direction or guide the route.</p>
           {(overrides.vias?.length ?? 0) > 0 && (
             <p className="text-sm font-medium">
               This track passes through {overrides.vias?.map((v, n) => v.street || `waypoint ${n + 1}`).join(", ")}. The blue {overrides.vias?.length === 1 ? "dot is" : "dots are"} on the map.
@@ -1255,54 +1314,12 @@ export function TripApp() {
                 const next = { ...overrides, vias: [] };
                 setOverrides(next);
                 setTapMode(null);
+                setMapFixContext(null);
                 void generate(next);
               }}
             >
               Clear {overrides.vias?.length} via {overrides.vias?.length === 1 ? "point" : "points"}
             </Button>
-          )}
-          <ul className="space-y-2">
-            {route.warnings.map((w, i) => {
-              const stop = route.stops.find((s) => s.index === w.stopIndex);
-              const destinationWarning = w.message.startsWith("Couldn't reach the last stop");
-              const maneuver = destinationWarning ? undefined : sheet.stops[w.stopIndex]?.maneuvers[w.maneuverIndex];
-              const isEditing = w.level === "warn" && warningFix?.stopIndex === w.stopIndex && warningFix.maneuverIndex === w.maneuverIndex;
-              return (
-                <li key={`${i}-${w.stopIndex}-${w.maneuverIndex}`} className={`rounded-lg p-3 text-sm ${w.level === "warn" ? "bg-[#ffedd5]" : "bg-white ring-1 ring-[#d9d2c3]"}`}>
-                  <p>{w.message}</p>
-                  {w.level === "warn" && (
-                    <div className="mt-2 flex flex-wrap gap-2">
-                      {stop && <Button type="button" variant="outline" className="h-10 bg-white" onClick={() => focusWarning(w.stopIndex)}>Guide on map</Button>}
-                      {maneuver && <Button type="button" variant="outline" className="h-10 bg-white" onClick={() => isEditing ? setWarningFix(null) : editWarning(w.stopIndex, w.maneuverIndex)}>{isEditing ? "Close edit" : "Quick fix"}</Button>}
-                    </div>
-                  )}
-                  {isEditing && warningFix && (
-                    <div className="mt-3 space-y-2 rounded-md bg-white p-3 ring-1 ring-[#d9d2c3]">
-                      <label className="block text-xs font-semibold" htmlFor={`fix-kind-${i}`}>Direction</label>
-                      <select id={`fix-kind-${i}`} className="h-11 w-full rounded-md border border-[#d9d2c3] bg-white px-3 text-base" value={warningFix.kind} onChange={(e) => setWarningFix({ ...warningFix, kind: e.target.value as ManeuverKind })}>
-                        {KINDS.map((kind) => <option key={kind} value={kind}>{KIND_LABEL[kind]}</option>)}
-                      </select>
-                      <Input aria-label="Correct street name" value={warningFix.street} onChange={(e) => setWarningFix({ ...warningFix, street: e.target.value })} placeholder="Street name from the trip sheet" />
-                      <div className="flex gap-2">
-                        <Button type="button" variant="outline" className="h-10 flex-1" onClick={() => setWarningFix(null)}>Cancel</Button>
-                        <Button type="button" className="h-10 flex-1 bg-[#0f2744] text-white" disabled={!warningFix.street.trim() || !!status} onClick={rebuildWarningFix}>Save and rebuild</Button>
-                      </div>
-                    </div>
-                  )}
-                </li>
-              );
-            })}
-          </ul>
-          {route.warnings.some((w) => w.level === "warn") && (
-            <label className="flex items-start gap-3 rounded-lg border-2 border-[#9a3412] bg-[#fff7ed] p-3 text-sm font-medium">
-              <input
-                type="checkbox"
-                className="mt-1 h-5 w-5 shrink-0 accent-[#0f2744]"
-                checked={warningAcknowledged}
-                onChange={(e) => setWarningAcknowledged(e.target.checked)}
-              />
-              <span>I reviewed the highlighted stops and warnings against the trip sheet before using this route.</span>
-            </label>
           )}
           {route.turnarounds.length > 0 && (
             <ul className="space-y-2">
@@ -1332,9 +1349,17 @@ export function TripApp() {
               <Button
                 type="button"
                 className={`h-12 text-base ${tapMode === "via" ? "bg-[#f5c451] text-[#142033]" : "bg-[#0f2744] text-white"}`}
-                onClick={() => setTapMode(tapMode === "via" ? null : "via")}
+                onClick={() => {
+                  if (tapMode === "via") {
+                    setTapMode(null);
+                    setMapFixContext(null);
+                  } else {
+                    setTapMode("via");
+                    setMapFixContext(null);
+                  }
+                }}
               >
-                {tapMode === "via" ? "Tap the road on the map" : "Add a via point"}
+                {tapMode === "via" ? "Cancel map point" : "Add a point on map"}
               </Button>
               <Button type="button" className="h-12 bg-[#0f2744] text-base text-white" disabled={!!status || (route.warnings.some((w) => w.level === "warn") && !warningAcknowledged)} onClick={saveToDay}>
                 Add to today’s list
