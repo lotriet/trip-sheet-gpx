@@ -99,7 +99,7 @@ export function buildDayGpx(runs: DayRunTrack[], deadheads: DeadheadLeg[]): stri
   const miles = (meters / 1609.344).toFixed(2);
   lines.push(`<trk><name>${esc(`Day ${title}`)}</name><desc>${esc(`${runs.length} runs, ${miles} mi including deadheads`)}</desc><type>Car</type>`);
   for (const [index, segment] of segments.entries()) {
-    if (index > 0) lines.push(`<trkseg>`);
+    lines.push(`<trkseg>`);
     for (const [lon, lat] of segment) lines.push(`<trkpt lat="${lat.toFixed(6)}" lon="${lon.toFixed(6)}"/>`);
     lines.push(`</trkseg>`);
   }
