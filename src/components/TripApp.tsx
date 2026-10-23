@@ -114,7 +114,7 @@ export function TripApp() {
     street: string;
   } | null>(null);
   const [mapFocus, setMapFocus] = useState<{ lat: number; lon: number; key: number }>();
-  const [mapFixContext, setMapFixContext] = useState<{ stopIndex: number; message: string } | null>(null);
+  const [mapFixContext, setMapFixContext] = useState<{ stopIndex: number; message: string; street?: string } | null>(null);
   const mapFocusKey = useRef(0);
   const [exportingDay, setExportingDay] = useState(false);
   const exportLock = useRef(false);
@@ -583,11 +583,11 @@ export function TripApp() {
     }
   }
 
-  function focusWarning(stopIndex: number, message: string) {
+  function focusWarning(stopIndex: number, message: string, street?: string) {
     const stop = route?.stops.find((s) => s.index === stopIndex);
     if (!stop) return;
     setMapFocus({ lat: stop.lat, lon: stop.lon, key: ++mapFocusKey.current });
-    setMapFixContext({ stopIndex, message });
+    setMapFixContext({ stopIndex, message, street });
     setTapMode("via");
     document.querySelector(".leaflet-container")?.scrollIntoView({ behavior: "smooth", block: "center" });
   }
@@ -635,7 +635,7 @@ export function TripApp() {
               <p>{w.message}</p>
               {w.level === "warn" && (
                 <div className="mt-2 flex flex-wrap gap-2">
-                  {stop && <Button type="button" variant="outline" className="h-10 bg-white" onClick={() => focusWarning(w.stopIndex, w.message)}>Guide on map</Button>}
+                  {stop && <Button type="button" variant="outline" className="h-10 bg-white" onClick={() => focusWarning(w.stopIndex, w.message, maneuver?.street)}>Guide on map</Button>}
                   {maneuver && <Button type="button" variant="outline" className="h-10 bg-white" onClick={() => isEditing ? setWarningFix(null) : editWarning(w.stopIndex, w.maneuverIndex)}>{isEditing ? "Close edit" : "Quick fix"}</Button>}
                 </div>
               )}
@@ -1259,7 +1259,11 @@ export function TripApp() {
                   <p className="mt-1">{mapFixContext.message}</p>
                 </>
               ) : <p className="font-bold">Add a point the route must pass.</p>}
-              <p className="mt-1">Tap the road the bus should use near this stop. A blue dot will appear and the route will rebuild.</p>
+              <p className="mt-1">
+                {mapFixContext?.street
+                  ? <>Tap <strong>{mapFixContext.street}</strong> near stop {mapFixContext.stopIndex + 1}, where the bus should enter that road. A blue dot will appear and the route will rebuild.</>
+                  : "Tap the road the bus should use near this stop. A blue dot will appear and the route will rebuild."}
+              </p>
               <Button type="button" variant="outline" className="mt-2 h-10" onClick={() => { setTapMode(null); setMapFixContext(null); }}>Cancel</Button>
             </div>
           )}

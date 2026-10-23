@@ -72,7 +72,7 @@ export default function RouteMap({
     ? [coords[Math.floor(coords.length / 2)][1], coords[Math.floor(coords.length / 2)][0]]
     : [35.8, -78.78];
   return (
-    <MapContainer center={center} zoom={13} className={`h-[min(55vh,420px)] w-full rounded-xl touch-none ${picking ? "ring-4 ring-[#f5c451]" : ""}`} scrollWheelZoom>
+    <MapContainer center={center} zoom={13} className={`${picking ? "h-[min(45vh,360px)] ring-4 ring-[#f5c451]" : "h-[min(55vh,420px)]"} w-full rounded-xl touch-none`} scrollWheelZoom>
       <TileLayer
         attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
         url="https://tile.openstreetmap.org/{z}/{x}/{y}.png"
