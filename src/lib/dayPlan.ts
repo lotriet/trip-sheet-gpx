@@ -63,14 +63,15 @@ export function buildDayGpx(runs: DayRunTrack[], deadheads: DeadheadLeg[]): stri
     `<?xml version="1.0" encoding="UTF-8"?>`,
     `<gpx version="1.1" creator="Trip Sheet GPX" xmlns="http://www.topografix.com/GPX/1/1">`,
     `<metadata><name>${esc(`Day ${title}`)}</name><desc>${esc(
-      "Runs in driving order as one track. A waypoint named DEADHEAD marks the start of the drive from the end of one run to the start of the next. That connection is a normal street drive, not a line from a trip sheet.",
+      "Runs are in driving order. Routed deadheads connect runs. When no road connection was found, the track resumes in a separate segment and must be checked before driving.",
     )}</desc></metadata>`,
   ];
 
-  const track: LonLat[] = [];
+  const segments: LonLat[][] = [[]];
   runs.forEach((run, i) => {
+    const track = segments[segments.length - 1];
     const label = [run.route, run.run ? `run ${run.run}` : ""].filter(Boolean).join(" ");
-    run.stops.forEach((stop, s) => {
+    run.stops.forEach((stop) => {
       const name = `Run ${i + 1} ${stop.time} ${prettySheetText(stop.description)}`.replace(/\s+/g, " ").trim();
       lines.push(
         `<wpt lat="${stop.lat.toFixed(6)}" lon="${stop.lon.toFixed(6)}"><name>${esc(name)}</name><desc>${esc(label)}</desc><sym>Flag, Blue</sym></wpt>`,
@@ -78,21 +79,30 @@ export function buildDayGpx(runs: DayRunTrack[], deadheads: DeadheadLeg[]): stri
     });
     appendLine(track, run.coords, 0.4);
     const link = deadheads[i];
-    if (i < runs.length - 1 && link && link.coords.length) {
-      const at = link.coords[0];
-      const how = link.routed
+    if (i < runs.length - 1) {
+      const at = link?.coords[0] ?? run.coords.at(-1);
+      const routed = !!link?.routed && !!link.coords.length;
+      const how = routed
         ? "Normal street drive to the next run. Not printed on a trip sheet."
-        : "The map had no drivable connection, so this is a straight line. Check it before you drive.";
-      lines.push(
-        `<wpt lat="${at[1].toFixed(6)}" lon="${at[0].toFixed(6)}"><name>${esc(`DEADHEAD to run ${i + 2}`)}</name><desc>${esc(how)}</desc><sym>Flag, Blue</sym></wpt>`,
-      );
-      appendLine(track, link.coords, 0.4);
+        : "No drivable connection was found. The track resumes in a separate segment; check the connection before driving.";
+      if (at) {
+        lines.push(
+          `<wpt lat="${at[1].toFixed(6)}" lon="${at[0].toFixed(6)}"><name>${esc(`DEADHEAD to run ${i + 2}`)}</name><desc>${esc(how)}</desc><sym>Flag, Blue</sym></wpt>`,
+        );
+      }
+      if (routed) appendLine(track, link!.coords, 0.4);
+      else segments.push([]);
     }
   });
 
-  const miles = (polylineMeters(track) / 1609.344).toFixed(2);
-  lines.push(`<trk><name>${esc(`Day ${title}`)}</name><desc>${esc(`${runs.length} runs, ${miles} mi including deadheads`)}</desc><type>Car</type><trkseg>`);
-  for (const [lon, lat] of track) lines.push(`<trkpt lat="${lat.toFixed(6)}" lon="${lon.toFixed(6)}"/>`);
-  lines.push(`</trkseg></trk></gpx>`);
+  const meters = segments.reduce((sum, segment) => sum + polylineMeters(segment), 0);
+  const miles = (meters / 1609.344).toFixed(2);
+  lines.push(`<trk><name>${esc(`Day ${title}`)}</name><desc>${esc(`${runs.length} runs, ${miles} mi including deadheads`)}</desc><type>Car</type>`);
+  for (const [index, segment] of segments.entries()) {
+    if (index > 0) lines.push(`<trkseg>`);
+    for (const [lon, lat] of segment) lines.push(`<trkpt lat="${lat.toFixed(6)}" lon="${lon.toFixed(6)}"/>`);
+    lines.push(`</trkseg>`);
+  }
+  lines.push(`</trk></gpx>`);
   return lines.join("\n") + "\n";
 }
