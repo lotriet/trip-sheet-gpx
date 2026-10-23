@@ -107,6 +107,8 @@ export function TripApp() {
   const [bigThumb, setBigThumb] = useState<string | null>(null);
   const [mapRun, setMapRun] = useState<string | null>(null);
   const [warningAcknowledged, setWarningAcknowledged] = useState(false);
+  const [exportingDay, setExportingDay] = useState(false);
+  const exportLock = useRef(false);
   const movePanel = useRef<HTMLDivElement>(null);
   // Server render says "Download all"; the phone switches to "Share all" if it can.
   const canShare = useSyncExternalStore(noSubscribe, canShareFiles, () => false);
@@ -589,7 +591,7 @@ export function TripApp() {
   }
 
   function saveToDay() {
-    if (!route) return;
+    if (!route || exportLock.current) return;
     const saved = savedRunFrom(editingId ?? newId(), text, sheet, route, overrides.vias ?? []);
     setMapRun(saved.id);
     if (reviewKey) {
@@ -614,6 +616,7 @@ export function TripApp() {
   }
 
   function move(index: number, dir: -1 | 1) {
+    if (exportLock.current) return;
     setRuns((prev) => {
       const j = index + dir;
       if (j < 0 || j >= prev.length) return prev;
@@ -633,34 +636,45 @@ export function TripApp() {
   }
 
   async function exportDay() {
-    if (!runs.length) return;
+    if (!runs.length || exportLock.current) return;
+    exportLock.current = true;
+    setExportingDay(true);
+    const exportRuns = [...runs];
     setError("");
-    const deadheads: DeadheadLeg[] = [];
-    for (let i = 0; i < runs.length - 1; i++) {
-      const a = runs[i].coords.at(-1);
-      const b = runs[i + 1].coords[0];
-      if (!a || !b) {
-        deadheads.push({ coords: [], routed: false });
-        continue;
+    try {
+      const deadheads: DeadheadLeg[] = [];
+      for (let i = 0; i < exportRuns.length - 1; i++) {
+        const a = exportRuns[i].coords.at(-1);
+        const b = exportRuns[i + 1].coords[0];
+        if (!a || !b) {
+          deadheads.push({ coords: [], routed: false });
+          continue;
+        }
+        setStatus(`Driving the deadhead from run ${i + 1} to run ${i + 2}…`);
+        try {
+          const corridor = await loadCorridor(a, b, setStatus);
+          const driven = driveBetween(corridor.lines, a, b);
+          deadheads.push(driven ? { coords: driven.coords, routed: true } : { coords: [a, b], routed: false });
+        } catch {
+          deadheads.push({ coords: [a, b], routed: false });
+        }
       }
-      setStatus(`Driving the deadhead from run ${i + 1} to run ${i + 2}…`);
-      try {
-        const corridor = await loadCorridor(a, b, setStatus);
-        const driven = driveBetween(corridor.lines, a, b);
-        deadheads.push(driven ? { coords: driven.coords, routed: true } : { coords: [a, b], routed: false });
-      } catch {
-        deadheads.push({ coords: [a, b], routed: false });
-      }
+      setStatus("");
+      if (!confirmDayOrder(deadheads, exportRuns)) return;
+      const gpx = buildDayGpx(exportRuns, deadheads);
+      downloadBlob(`day_${exportRuns.length}_runs.gpx`, new Blob([gpx], { type: "application/gpx+xml" }));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "The day’s GPX could not be built.");
+    } finally {
+      setStatus("");
+      exportLock.current = false;
+      setExportingDay(false);
     }
-    setStatus("");
-    if (!confirmDayOrder(deadheads)) return;
-    const gpx = buildDayGpx(runs, deadheads);
-    downloadBlob(`day_${runs.length}_runs.gpx`, new Blob([gpx], { type: "application/gpx+xml" }));
   }
 
-  function confirmDayOrder(deadheads?: DeadheadLeg[]) {
-    if (!runs.length) return false;
-    const review = runs.map((run, i) => {
+  function confirmDayOrder(deadheads?: DeadheadLeg[], snapshot = runs) {
+    if (!snapshot.length) return false;
+    const review = snapshot.map((run, i) => {
       const warningCount = run.warnings.filter((w) => w.level === "warn").length;
       return `${i + 1}. ${run.route || "Route"} ${run.run || ""} — ${run.firstTime || "no time"}${warningCount ? ` — ${warningCount} route warning${warningCount === 1 ? "" : "s"}` : ""}`;
     }).join("\n");
@@ -744,10 +758,10 @@ export function TripApp() {
                   </p>
                 </div>
                 <div className="flex flex-col gap-1">
-                  <Button type="button" variant="outline" className="h-10 px-3" onClick={() => move(i, -1)} disabled={i === 0}>
+                  <Button type="button" variant="outline" className="h-10 px-3" onClick={() => move(i, -1)} disabled={exportingDay || i === 0}>
                     Up
                   </Button>
-                  <Button type="button" variant="outline" className="h-10 px-3" onClick={() => move(i, 1)} disabled={i === runs.length - 1}>
+                  <Button type="button" variant="outline" className="h-10 px-3" onClick={() => move(i, 1)} disabled={exportingDay || i === runs.length - 1}>
                     Down
                   </Button>
                 </div>
@@ -772,13 +786,13 @@ export function TripApp() {
                 <Button type="button" variant="outline" className="h-10" onClick={() => setMapRun(mapRun === run.id ? null : run.id)} disabled={run.coords.length < 2}>
                   {mapRun === run.id ? "Hide map" : "Map"}
                 </Button>
-                <Button type="button" variant="outline" className="h-10" onClick={() => openEdit(run)}>
+                <Button type="button" variant="outline" className="h-10" onClick={() => openEdit(run)} disabled={exportingDay}>
                   Edit
                 </Button>
                 <Button type="button" variant="outline" className="h-10" onClick={() => downloadBlob(runFileName(i, run), new Blob([run.gpx], { type: "application/gpx+xml" }))}>
                   This GPX
                 </Button>
-                <Button type="button" variant="destructive" className="h-10" onClick={() => setRuns((prev) => prev.filter((r) => r.id !== run.id))}>
+                <Button type="button" variant="destructive" className="h-10" onClick={() => setRuns((prev) => prev.filter((r) => r.id !== run.id))} disabled={exportingDay}>
                   Remove
                 </Button>
               </div>
@@ -786,14 +800,14 @@ export function TripApp() {
           ))}
           <div className="fixed inset-x-0 bottom-0 border-t border-[#d9d2c3] bg-[#f6f3ea] p-3">
             <div className="mx-auto flex max-w-lg flex-col gap-2">
-              <Button type="button" className="h-12 bg-[#0f2744] text-base text-white" onClick={openNew}>
+              <Button type="button" className="h-12 bg-[#0f2744] text-base text-white" onClick={openNew} disabled={exportingDay}>
                 Add a run
               </Button>
               <div className="grid grid-cols-2 gap-2">
-                <Button type="button" variant="outline" className="h-12 text-sm" disabled={!runs.length} onClick={() => void exportDay()}>
-                  One GPX for the day
+                <Button type="button" variant="outline" className="h-12 text-sm" disabled={!runs.length || exportingDay} onClick={() => void exportDay()}>
+                  {exportingDay ? "Preparing day GPX…" : "One GPX for the day"}
                 </Button>
-                <Button type="button" variant="outline" className="h-12 text-sm" disabled={!runs.length} onClick={() => void shareAll()}>
+                <Button type="button" variant="outline" className="h-12 text-sm" disabled={!runs.length || exportingDay} onClick={() => void shareAll()}>
                   {canShare ? "Share all" : "Download all"}
                 </Button>
               </div>
