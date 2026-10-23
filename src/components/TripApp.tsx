@@ -264,6 +264,7 @@ export function TripApp() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sheet, streetIndex, runCenter, view, recheckTick]);
   const reviewTrip = reviewKey ? (trips.find((t) => t.key === reviewKey) ?? null) : null;
+  const editingLockedRun = editingId != null && runs.some((run) => run.id === editingId && run.locked);
 
   useEffect(() => {
     // Load the map quietly once the form has stops, after typing settles.
@@ -678,6 +679,10 @@ export function TripApp() {
 
   function saveToDay() {
     if (!route || exportLock.current) return;
+    if (editingLockedRun) {
+      setError("This GPX is locked. Return to today’s list and unlock it before replacing the saved track.");
+      return;
+    }
     const saved = savedRunFrom(editingId ?? newId(), text, sheet, route, overrides.vias ?? []);
     setMapRun(saved.id);
     if (reviewKey) {
@@ -710,6 +715,18 @@ export function TripApp() {
       [copy[index], copy[j]] = [copy[j], copy[index]];
       return copy;
     });
+  }
+
+  function toggleRunLock(id: string) {
+    if (exportLock.current) return;
+    setRuns((prev) => prev.map((run) => run.id === id ? { ...run, locked: !run.locked } : run));
+  }
+
+  function removeRun(run: SavedRun) {
+    if (run.locked || exportLock.current) return;
+    const label = [run.route, run.run].filter(Boolean).join(" ") || "this GPX";
+    if (!window.confirm(`Remove ${label} from today’s list? This also deletes its saved GPX from this phone.`)) return;
+    setRuns((prev) => prev.filter((item) => item.id !== run.id));
   }
 
   async function shareAll() {
@@ -836,6 +853,7 @@ export function TripApp() {
               <div className="flex items-start justify-between gap-2">
                 <div>
                   <p className="text-xs font-semibold text-[#0f2744]">Run {i + 1}</p>
+                  {run.locked && <span className="mt-1 inline-flex rounded-full bg-[#e8f3e8] px-2 py-0.5 text-xs font-semibold text-[#246b36]">GPX locked</span>}
                   <h2 className="text-lg font-semibold leading-tight">
                     {run.route || "Route"} {run.run && <span className="text-base font-medium">{run.run}</span>}
                   </h2>
@@ -894,8 +912,11 @@ export function TripApp() {
                 <Button type="button" variant="outline" className="h-10" onClick={() => downloadBlob(runFileName(i, run), new Blob([run.gpx], { type: "application/gpx+xml" }))}>
                   This GPX
                 </Button>
-                <Button type="button" variant="destructive" className="h-10" onClick={() => setRuns((prev) => prev.filter((r) => r.id !== run.id))} disabled={exportingDay}>
-                  Remove
+                <Button type="button" variant="outline" className={`col-span-2 h-10 ${run.locked ? "border-[#246b36] bg-[#e8f3e8] text-[#246b36]" : ""}`} onClick={() => toggleRunLock(run.id)} disabled={exportingDay} aria-pressed={!!run.locked}>
+                  {run.locked ? "Unlock GPX to edit or remove" : "Lock this GPX"}
+                </Button>
+                <Button type="button" variant="destructive" className="col-span-2 h-10" onClick={() => removeRun(run)} disabled={exportingDay || !!run.locked}>
+                  {run.locked ? "Locked · cannot remove" : "Remove"}
                 </Button>
               </div>
             </article>
@@ -1418,8 +1439,9 @@ export function TripApp() {
               >
                 {tapMode === "via" ? "Cancel map point" : "Add a point on map"}
               </Button>
-              <Button type="button" className="h-12 bg-[#0f2744] text-base text-white" disabled={!!status || (route.warnings.some((w) => w.level === "warn") && !warningAcknowledged)} onClick={saveToDay}>
-                Add to today’s list
+              {editingLockedRun && <p className="rounded-lg border border-[#246b36] bg-[#e8f3e8] p-2 text-sm text-[#173b22]">This GPX is locked. Your saved track stays safe; unlock it from today’s list before replacing it with this route.</p>}
+              <Button type="button" className="h-12 bg-[#0f2744] text-base text-white" disabled={!!status || editingLockedRun || (route.warnings.some((w) => w.level === "warn") && !warningAcknowledged)} onClick={saveToDay}>
+                {editingLockedRun ? "Unlock GPX to replace it" : "Add to today’s list"}
               </Button>
               <div className="grid grid-cols-2 gap-2">
                 <Button type="button" variant="outline" className="h-12" onClick={() => setView("edit")}>
