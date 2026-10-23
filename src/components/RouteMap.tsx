@@ -19,6 +19,15 @@ function Fit({ coords }: { coords: LonLat[] }) {
   return null;
 }
 
+function FocusPoint({ point }: { point?: { lat: number; lon: number; key: number } }) {
+  const map = useMap();
+  useEffect(() => {
+    if (!point) return;
+    map.setView([point.lat, point.lon], Math.max(map.getZoom(), 16), { animate: false });
+  }, [map, point]);
+  return null;
+}
+
 function Clicks({ onClick }: { onClick?: (lat: number, lon: number) => void }) {
   useMapEvents({
     click(e) {
@@ -43,6 +52,7 @@ export default function RouteMap({
   turnarounds,
   vias = [],
   warningStops = [],
+  focusPoint,
   selectedTurnaround,
   picking = false,
   onMapClick,
@@ -52,6 +62,7 @@ export default function RouteMap({
   turnarounds: TurnaroundPin[];
   vias?: { lat: number; lon: number }[];
   warningStops?: StopPin[];
+  focusPoint?: { lat: number; lon: number; key: number };
   selectedTurnaround?: string | null;
   /** The next tap should add a via, so the map takes the touch instead of the page. */
   picking?: boolean;
@@ -67,6 +78,7 @@ export default function RouteMap({
         url="https://tile.openstreetmap.org/{z}/{x}/{y}.png"
       />
       <Fit coords={coords} />
+      <FocusPoint point={focusPoint} />
       <Clicks onClick={onMapClick} />
       {coords.length > 1 && (
         <Polyline positions={coords.map((c) => [c[1], c[0]] as [number, number])} pathOptions={{ color: "#0f2744", weight: 5, opacity: 0.9 }} />
