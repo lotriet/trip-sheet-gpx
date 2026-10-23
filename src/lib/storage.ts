@@ -18,6 +18,8 @@ export type SavedRun = {
   coords: LonLat[];
   stops: DayStop[];
   warnings: { level: "info" | "warn"; message: string; stopIndex?: number; maneuverIndex?: number }[];
+  /** Protect this saved track from accidental removal or replacement. */
+  locked?: boolean;
   /** Taps the track was bent through. Old saved runs omit this. */
   vias?: { lat: number; lon: number; street?: string }[];
 };

@@ -231,9 +231,11 @@ export function gpxFileName(run: string, index: number, used: Set<string>): stri
  * starts later, so the list stays in driving order without moving runs the
  * driver already placed. A run with the same run number is replaced.
  */
-export function mergeIntoDay<T extends { run: string; firstTime: string }>(day: T[], added: T[]): T[] {
-  let out = day.filter((d) => !d.run || !added.some((a) => a.run === d.run));
+export function mergeIntoDay<T extends { run: string; firstTime: string; locked?: boolean }>(day: T[], added: T[]): T[] {
+  let out = day.filter((d) => d.locked || !d.run || !added.some((a) => a.run === d.run));
   for (const run of added) {
+    // A protected GPX wins over a newly imported run with the same run number.
+    if (run.run && out.some((existing) => existing.locked && existing.run === run.run)) continue;
     const t = minutesOf(run.firstTime);
     const at = t == null ? -1 : out.findIndex((d) => {
       const dt = minutesOf(d.firstTime);
