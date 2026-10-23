@@ -11,6 +11,8 @@ const eslintConfig = defineConfig([
     ".next/**",
     "out/**",
     "build/**",
+    // Public files include third-party minified PDF and OCR worker bundles.
+    "public/**",
     "next-env.d.ts",
   ]),
 ]);
