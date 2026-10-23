@@ -634,7 +634,6 @@ export function TripApp() {
 
   async function exportDay() {
     if (!runs.length) return;
-    if (!confirmDayOrder()) return;
     setError("");
     const deadheads: DeadheadLeg[] = [];
     for (let i = 0; i < runs.length - 1; i++) {
@@ -654,17 +653,21 @@ export function TripApp() {
       }
     }
     setStatus("");
+    if (!confirmDayOrder(deadheads)) return;
     const gpx = buildDayGpx(runs, deadheads);
     downloadBlob(`day_${runs.length}_runs.gpx`, new Blob([gpx], { type: "application/gpx+xml" }));
   }
 
-  function confirmDayOrder() {
+  function confirmDayOrder(deadheads?: DeadheadLeg[]) {
     if (!runs.length) return false;
     const review = runs.map((run, i) => {
       const warningCount = run.warnings.filter((w) => w.level === "warn").length;
       return `${i + 1}. ${run.route || "Route"} ${run.run || ""} — ${run.firstTime || "no time"}${warningCount ? ` — ${warningCount} route warning${warningCount === 1 ? "" : "s"}` : ""}`;
     }).join("\n");
-    return window.confirm(`Review today’s GPX order before export:\n\n${review}\n\nThe day file follows this order. Check any route warnings and verify connections between runs. Continue?`);
+    const connections = deadheads?.map((leg, i) =>
+      `Runs ${i + 1} → ${i + 2}: ${leg.routed ? "road route found" : "no road connection found; tracks remain separate"}`,
+    ).join("\n");
+    return window.confirm(`Review today’s GPX order before export:\n\n${review}${connections ? `\n\nBetween runs:\n${connections}` : ""}\n\nCheck any route warnings and verify the order and connections. Continue?`);
   }
 
   const previewStops = useMemo(
@@ -1233,7 +1236,7 @@ export function TripApp() {
               >
                 {tapMode === "via" ? "Tap the road on the map" : "Add a via point"}
               </Button>
-              <Button type="button" className="h-12 bg-[#0f2744] text-base text-white" disabled={route.warnings.some((w) => w.level === "warn") && !warningAcknowledged} onClick={saveToDay}>
+              <Button type="button" className="h-12 bg-[#0f2744] text-base text-white" disabled={!!status || (route.warnings.some((w) => w.level === "warn") && !warningAcknowledged)} onClick={saveToDay}>
                 Add to today’s list
               </Button>
               <div className="grid grid-cols-2 gap-2">
@@ -1244,7 +1247,7 @@ export function TripApp() {
                   type="button"
                   variant="outline"
                   className="h-12"
-                  disabled={route.warnings.some((w) => w.level === "warn") && !warningAcknowledged}
+                  disabled={!!status || (route.warnings.some((w) => w.level === "warn") && !warningAcknowledged)}
                   onClick={() =>
                     downloadBlob(
                       runFileName(0, {
