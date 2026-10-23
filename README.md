@@ -1,6 +1,6 @@
 # Trip sheet to GPX
 
-A phone-friendly page that turns a Wake County (WCPSS) **Driver Directions by Route** sheet into a GPX track for [OsmAnd](https://osmand.net/).
+A phone-friendly page that turns a school bus **Driver Directions by Route** sheet into a GPX track for [OsmAnd](https://osmand.net/).
 
 The track follows the printed streets **in order**, with the printed turn directions. It does not shorten the run or skip a street. You can stack several runs into one day, then download either one combined track or every run's track at once.
 
@@ -9,7 +9,7 @@ Photos and sheet text stay in the browser. Nothing is uploaded or stored on a se
 ## On the phone
 
 1. Open the page in Safari or Chrome. Add it to the home screen if you want it one tap away.
-2. Tap **Add a run**. The area starts as Wake County, North Carolina. Change it if the sheet is somewhere else.
+2. Tap **Add a run**. Confirm the service area and change it if needed.
 3. Take one or more photos of the sheet, or paste the text. Several pages are fine — add every photo before you build the route. Photos of a whole shift (several runs) are sorted by their **Run:** number into one row per trip; check the rows (move a photo if one landed in the wrong trip), then **Build** them all at once. Each run is added to the day list in start-time order.
 
 In the form, a green ✓ next to a street or stop means it was found on the map near the other stops. A red **?** means it wasn't (often a misread letter); tap it for the closest real names.
