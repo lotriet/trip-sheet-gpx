@@ -17,6 +17,26 @@ export type PhotoResult =
   | { ok: true; name: string; text: string; /** Small JPEG of the page as read, for telling pages apart. */ thumb?: string }
   | { ok: false; name: string; reason: string };
 
+type NativeOcrLine = { text: string; left: number; top: number; width: number; height: number; confidence: number };
+
+declare global {
+  interface Window {
+    TripNavNativeOCR?: { postMessage(message: string): void };
+    TripNavGPX?: { postMessage(message: string): void };
+    resolveTripNavNativeOcr?: (id: string, lines: NativeOcrLine[] | null) => void;
+  }
+}
+
+const nativeOcrPending = new Map<string, (lines: NativeOcrLine[] | null) => void>();
+let nativeOcrSequence = 0;
+
+if (typeof window !== "undefined") {
+  window.resolveTripNavNativeOcr = (id, lines) => {
+    nativeOcrPending.get(id)?.(lines);
+    nativeOcrPending.delete(id);
+  };
+}
+
 /** Longest side we decode to. Keeps phones under their canvas memory limits. */
 const MAX_DECODE_SIDE = 3200;
 
@@ -28,6 +48,26 @@ export async function readSheetPhotos(
 ): Promise<PhotoResult[]> {
   const results: PhotoResult[] = [];
   if (!files.length) return results;
+  if (typeof window !== "undefined" && window.TripNavNativeOCR) {
+    onStatus?.("Reading photos on this phone…");
+    for (const [index, file] of files.entries()) {
+      const name = (file as File).name || `Photo ${index + 1}`;
+      onStatus?.(files.length > 1 ? `Reading photo ${index + 1} of ${files.length} on this phone…` : "Reading the photo on this phone…");
+      try {
+        const lines = await recognizeNatively(file);
+        if (!lines?.length) throw new PhotoError(RETAKE_MESSAGE);
+        const ordered = lines.slice().sort((a, b) => a.top - b.top || a.left - b.left);
+        const header = ordered.filter((line) => line.top < 0.18).map((line) => line.text).join("\n");
+        const body = ordered.filter((line) => line.left < 0.73).map((line) => line.text).join("\n");
+        const text = normalizeSheetOcr(header, body);
+        if (!judgeSheetText(text).ok) throw new PhotoError(RETAKE_MESSAGE);
+        results.push({ ok: true, name, text });
+      } catch (err) {
+        results.push({ ok: false, name, reason: err instanceof PhotoError ? err.message : RETAKE_MESSAGE });
+      }
+    }
+    return results;
+  }
   let current = 0;
   const label = () => (files.length > 1 ? `Reading photo ${current + 1} of ${files.length}` : "Reading the photo");
   onStatus?.("Loading the text reader…");
@@ -63,6 +103,33 @@ export async function readSheetPhotos(
     await worker.terminate();
   }
   return results;
+}
+
+async function recognizeNatively(file: Blob): Promise<NativeOcrLine[] | null> {
+  const bitmap = await decode(file);
+  const scale = Math.min(1, 2800 / Math.max(bitmap.width, bitmap.height));
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.max(1, Math.round(bitmap.width * scale));
+  canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+  const context = canvas.getContext("2d");
+  if (!context) throw new PhotoError(RETAKE_MESSAGE);
+  context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+  if ("close" in bitmap) bitmap.close();
+  const jpeg = await new Promise<Blob>((resolve, reject) => canvas.toBlob((blob) => blob ? resolve(blob) : reject(new PhotoError(RETAKE_MESSAGE)), "image/jpeg", 0.9));
+  canvas.width = canvas.height = 0;
+  const bytes = new Uint8Array(await jpeg.arrayBuffer());
+  let binary = "";
+  for (let i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  const id = `ocr-${Date.now()}-${++nativeOcrSequence}`;
+  const response = new Promise<NativeOcrLine[] | null>((resolve) => {
+    const timeout = setTimeout(() => {
+      nativeOcrPending.delete(id);
+      resolve(null);
+    }, 60000);
+    nativeOcrPending.set(id, (lines) => { clearTimeout(timeout); resolve(lines); });
+  });
+  window.TripNavNativeOCR?.postMessage(JSON.stringify({ id, data: btoa(binary) }));
+  return response;
 }
 
 class PhotoError extends Error {}

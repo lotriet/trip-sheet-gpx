@@ -20,7 +20,7 @@ import { osrmRouter } from "@/lib/osrm";
 import { RETAKE_MESSAGE } from "@/lib/ocr/quality";
 import { loadDay, saveDay, type SavedRun } from "@/lib/storage";
 import { autoGroup, buildTrips, describePage, dropDuplicatePages, gpxFileName, mergeIntoDay, newTripKey, sortStopsByTime, splitRuns, type PageInfo, type PageRead, type Trip } from "@/lib/batch";
-import { canShareFiles, shareOrDownload } from "@/lib/shareFiles";
+import { canShareFiles, sendNativeGpx, shareOrDownload } from "@/lib/shareFiles";
 import { buildStreetIndex, checkStop, checkStreet, looseName, sheetStyle, suggestFor as suggestNames } from "@/lib/streetCheck";
 
 const RouteMap = dynamic(() => import("@/components/RouteMap"), {
@@ -46,6 +46,10 @@ function emptySheet(): Sheet {
 
 function downloadBlob(name: string, blob: Blob) {
   const filename = name.toLowerCase().endsWith(".gpx") ? name : `${name.replace(/\.[^.]*$/, "")}.gpx`;
+  if (typeof window !== "undefined" && window.TripNavGPX) {
+    void blob.text().then((text) => sendNativeGpx([{ name: filename, text }]));
+    return;
+  }
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
@@ -698,6 +702,11 @@ export function TripApp() {
       return;
     }
     const saved = savedRunFrom(editingId ?? newId(), text, sheet, route, overrides.vias ?? []);
+    const willFinishReview = !reviewKey || trips.every((trip) => trip.key === reviewKey || tripStates[trip.key]?.state === "added");
+    sendNativeGpx([{
+      name: runFileName(0, { run: saved.run, description: saved.description, firstTime: saved.firstTime }),
+      text: saved.gpx,
+    }], willFinishReview);
     setMapRun(saved.id);
     if (reviewKey) {
       // Built from the review list: add it to the day by time and go back to the other trips.
