@@ -32,7 +32,7 @@ export function canShareFiles(): boolean {
   return shareableFiles([{ name: "test.gpx", text: "<gpx/>" }]) != null;
 }
 
-export function downloadText(name: string, text: string, type = "application/gpx+xml") {
+export function downloadText(name: string, text: string, type = "application/octet-stream") {
   const url = URL.createObjectURL(new Blob([text], { type }));
   const a = document.createElement("a");
   a.href = url;

@@ -1,0 +1,82 @@
+/** Turn OCR's page text into the route fields the sheet actually prints. */
+
+const TIME = /^\W*\d{1,2}\s*:\s*\d{2}\s*[AP]M\b/i;
+const DIRECTION = /^\W*(?:proceed|procead|continue|right|left|rt\b|lt\b|turn\s*around|tum\s*around|u[\s-]?turn)\b/i;
+
+function headerField(text: string, label: string): string {
+  const match = text.match(new RegExp(`\\b${label}[ \\t]*[:_][ \\t]*([^\\n]+)`, "i"));
+  return match?.[1]?.trim() ?? "";
+}
+
+function usableDescription(value: string): string {
+  const cleaned = value.replace(/\s+Run\s*:.*$/i, "").trim();
+  const letters = cleaned.match(/[A-Za-z]/g)?.length ?? 0;
+  return letters < 4 || !/^[A-Z0-9]/i.test(cleaned) || /driver directions|according to TIMS|confidential/i.test(cleaned) ? "" : cleaned;
+}
+
+function routeNumber(text: string): string {
+  const value = text.match(/\bRoute\s*[:_]\s*([A-Z]{1,4}\s*\d{2,6})\b/i)?.[1]?.replace(/\s+/g, "") ?? "";
+  // On these sheets the printed GH prefix is occasionally read as GHI/ GHL.
+  return value.replace(/^GH[IL](?=\d)/i, "GH");
+}
+
+function runNumber(text: string): string {
+  const match = text.match(/\bRun\s*[:_]\s*((?:\d\s*){3})\s*[.,]\s*((?:\d\s*){3})\b/i);
+  return match ? `${match[1].replace(/\s/g, "")}.${match[2].replace(/\s/g, "")}` : "";
+}
+
+function bodyDescription(text: string): string {
+  // In a left-column crop the leading "Descr" may be outside the image.
+  const match = text.match(/\b(?:description|[a-z]*iption)\s*[:_]\s*([A-Z0-9][A-Z0-9 ()&'-]{2,50})/i);
+  return usableDescription(match?.[1] ?? "");
+}
+
+function cleanContent(line: string): string {
+  return line
+    .replace(/\bProcead\b/gi, "Proceed")
+    .replace(/\bTu[mnr]\b/gi, "Turn")
+    .replace(/\bPK\s+WY\b/gi, "PKWY")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function canContinue(line: string): boolean {
+  const letters = line.replace(/[^A-Za-z]/g, "");
+  if (letters.length < 2) return false;
+  const upper = letters.replace(/[^A-Z]/g, "").length;
+  return upper / letters.length > 0.85 && /^[A-Z0-9 &@().,'/#-]+$/.test(line);
+}
+
+export function normalizeSheetOcr(headerRaw: string, bodyRaw: string): string {
+  const header = `${headerRaw}\n${bodyRaw.slice(0, 400)}`;
+  const route = routeNumber(header);
+  const run = runNumber(headerRaw) || runNumber(bodyRaw);
+  const description =
+    usableDescription(headerField(headerRaw, "Description")) ||
+    usableDescription(headerField(bodyRaw, "Description")) ||
+    bodyDescription(bodyRaw);
+  const result: string[] = [];
+  if (route) result.push(`Route: ${route}`);
+  if (description) result.push(`Description: ${description}`);
+  if (run) result.push(`Run: ${run}`);
+
+  let started = false;
+  let previousWasContent = false;
+  for (const raw of bodyRaw.replace(/\r/g, "").split("\n")) {
+    const line = cleanContent(raw);
+    if (!line) continue;
+    if (TIME.test(line) || DIRECTION.test(line)) {
+      started = true;
+      previousWasContent = true;
+      result.push(line);
+      continue;
+    }
+    // A long stop or street name sometimes wraps onto a second printed line.
+    if (started && previousWasContent && canContinue(line)) {
+      result[result.length - 1] += ` ${line}`;
+      continue;
+    }
+    previousWasContent = false;
+  }
+  return result.join("\n");
+}
