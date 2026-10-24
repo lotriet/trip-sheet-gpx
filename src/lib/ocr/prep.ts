@@ -352,15 +352,22 @@ export type Prepared = { image: Gray; landscape: boolean; cropped: boolean; conv
 /** Crop to the page, scale it, flatten the light. Rotation is decided later. */
 export function preparePage(src: Gray): Prepared {
   const found = findPage(src);
-  let page = found ? crop(blankOutside(src, found), found.box) : src;
+  // A weak page mask can classify shadows on the paper as background and
+  // erase whole rows. Use the original photo when the detection is uncertain.
+  const foundRatio = found ? Math.max(found.box.w, found.box.h) / Math.min(found.box.w, found.box.h) : Infinity;
+  const convincing = !!found && found.contrast >= MIN_PAGE_CONTRAST && foundRatio < 1.9;
+  const safeCrop = !!found && found.box.w * found.box.h >= src.width * src.height * 0.9;
+  let page = convincing && found
+    ? crop(blankOutside(src, found), found.box)
+    : safeCrop && found
+      ? crop(src, found.box)
+      : src;
   const landscape = page.width > page.height * 1.08;
   // Scale so the page's short side (its width when upright) is PAGE_WIDTH.
   const short = Math.min(page.width, page.height);
   const s = Math.min(PAGE_WIDTH / short, MAX_PAGE_SIDE / Math.max(page.width, page.height));
   page = resize(page, Math.max(1, Math.round(page.width * s)), Math.max(1, Math.round(page.height * s)));
-  const ratio = Math.max(page.width, page.height) / short;
-  const convincing = !!found && found.contrast >= MIN_PAGE_CONTRAST && ratio < 1.9;
-  return { image: flattenLight(page), landscape, cropped: !!found, convincing };
+  return { image: flattenLight(page), landscape, cropped: convincing || safeCrop, convincing };
 }
 
 /** Rotations to try, most likely first. */

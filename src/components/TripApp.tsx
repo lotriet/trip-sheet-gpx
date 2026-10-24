@@ -45,11 +45,15 @@ function emptySheet(): Sheet {
 }
 
 function downloadBlob(name: string, blob: Blob) {
+  const filename = name.toLowerCase().endsWith(".gpx") ? name : `${name.replace(/\.[^.]*$/, "")}.gpx`;
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
-  a.download = name;
+  a.download = filename;
+  a.rel = "noopener";
+  document.body.appendChild(a);
   a.click();
+  a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 4000);
 }
 
@@ -775,7 +779,7 @@ export function TripApp() {
       setStatus("");
       if (!confirmDayOrder(deadheads, exportRuns)) return;
       const gpx = buildDayGpx(exportRuns, deadheads);
-      downloadBlob(`day_${exportRuns.length}_runs.gpx`, new Blob([gpx], { type: "application/gpx+xml" }));
+      downloadBlob(`day_${exportRuns.length}_runs.gpx`, new Blob([gpx], { type: "application/octet-stream" }));
     } catch (err) {
       setError(err instanceof Error ? err.message : "The day’s GPX could not be built.");
     } finally {
@@ -942,7 +946,7 @@ export function TripApp() {
                 <Button type="button" variant="outline" className="h-10" onClick={() => openEdit(run)} disabled={exportingDay}>
                   Edit
                 </Button>
-                <Button type="button" variant="outline" className="h-10" onClick={() => downloadBlob(runFileName(i, run), new Blob([run.gpx], { type: "application/gpx+xml" }))}>
+                <Button type="button" variant="outline" className="h-10" onClick={() => downloadBlob(runFileName(i, run), new Blob([run.gpx], { type: "application/octet-stream" }))}>
                   This GPX
                 </Button>
                 <Button type="button" variant="outline" className={`col-span-2 h-10 ${run.locked ? "border-[#246b36] bg-[#e8f3e8] text-[#246b36]" : ""}`} onClick={() => toggleRunLock(run.id)} disabled={exportingDay} aria-pressed={!!run.locked}>
@@ -1492,7 +1496,7 @@ export function TripApp() {
                         description: sheet.description,
                         firstTime: sheet.stops[0]?.time ?? "",
                       }),
-                      new Blob([buildGpx(sheet, route.coords, route.stops)], { type: "application/gpx+xml" }),
+                      new Blob([buildGpx(sheet, route.coords, route.stops)], { type: "application/octet-stream" }),
                     )
                   }
                 >

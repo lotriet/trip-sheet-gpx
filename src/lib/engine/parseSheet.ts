@@ -96,7 +96,7 @@ function peelTail(raw: string): {
 
 function parseManeuver(line: string): Maneuver | null {
   const s = line.replace(/[.]+\s*$/, "").trim();
-  let m = s.match(/^(?:proceed|continue)\s+on\s+(.+)$/i);
+  let m = s.match(/^(?:proceed|continue)\s+on(?:to)?\s+(.+)$/i);
   if (m) return { kind: "proceed", street: tidyStreet(m[1]) };
   m = s.match(/^(?:right|rt)\s*(?:turn\s*)?(?:onto|on|to)\s+(.+)$/i);
   if (m) return { kind: "right", street: tidyStreet(m[1]) };

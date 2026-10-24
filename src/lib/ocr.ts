@@ -8,8 +8,9 @@
  * than passed on as gibberish.
  */
 
-import { preparePage, resize, rgbaToGray, rotate, rotationCandidates, type Gray } from "./ocr/prep";
-import { judgeSheetText, keepLines, RETAKE_MESSAGE, type OcrLine } from "./ocr/quality";
+import { crop, preparePage, resize, rgbaToGray, rotate, rotationCandidates, type Gray } from "./ocr/prep";
+import { normalizeSheetOcr } from "./ocr/document";
+import { judgeSheetText, RETAKE_MESSAGE } from "./ocr/quality";
 import type { PSM as PageSegmentationMode } from "tesseract.js";
 
 export type PhotoResult =
@@ -74,30 +75,29 @@ async function readOne(
 ): Promise<PhotoResult> {
   const gray = await decodeToGray(file);
   const prepared = preparePage(gray);
-  let candidates = rotationCandidates(prepared.landscape);
-  if (!prepared.convincing) {
-    // No clear white page in the photo. Take a quick low-resolution look
-    // first, so a photo of a seat or a blurry shot is turned down in a second
-    // or two instead of a full read.
-    const keep: number[] = [];
-    for (const degrees of candidates) {
-      const preview = shrink(rotate(prepared.image, degrees), 1200);
-      let q = judgeSheetText(await readLines(worker, preview, psmModes.AUTO));
-      if (q.directions + q.times + (q.header ? 1 : 0) === 0) {
-        q = judgeSheetText(await readLines(worker, preview, psmModes.SINGLE_BLOCK));
-      }
-      if (q.directions + q.times + (q.header ? 1 : 0) > 0) keep.push(degrees);
-    }
-    if (!keep.length) return { ok: false, name, reason: RETAKE_MESSAGE };
-    candidates = keep;
-  }
+  const candidates = rotationCandidates(prepared.landscape);
   let best: { text: string; score: number; ok: boolean; directions: number; degrees: number } | null = null;
   for (const degrees of candidates) {
     const page = rotate(prepared.image, degrees);
-    // Auto layout handles tables and uneven columns better; the block mode is
-    // a second chance for sheets printed as one tightly packed text block.
+    const header = crop(page, { x: 0, y: 0, w: page.width, h: Math.max(1, Math.round(page.height * 0.15)) });
+    // Run numbers sit at the far right of the banner and can be missed when
+    // the sheet is photographed against a textured background. Read that small
+    // banner area separately at full resolution.
+    const runHeader = crop(page, {
+      x: Math.round(page.width * 0.75),
+      y: Math.round(page.height * 0.01),
+      w: Math.max(1, page.width - Math.round(page.width * 0.75)),
+      h: Math.max(1, Math.round(page.height * 0.09)),
+    });
+    const body = crop(page, { x: 0, y: 0, w: Math.max(1, Math.round(page.width * 0.73)), h: page.height });
+    const headerText = await readText(worker, header, psmModes.AUTO);
+    const runText = await readText(worker, resize(runHeader, runHeader.width * 2, runHeader.height * 2), psmModes.AUTO);
+    // The OCR engine sees the printed time, description, and directions only.
+    // Its own text output preserves reading order better than recombining
+    // individual word boxes from the table.
     for (const psm of [psmModes.AUTO, psmModes.SINGLE_BLOCK]) {
-      const text = await readLines(worker, page, psm);
+      const bodyText = await readText(worker, body, psm);
+      const text = normalizeSheetOcr(`${headerText}\n${runText}`, bodyText);
       const q = judgeSheetText(text);
       if (!best || q.score > best.score) best = { text, score: q.score, ok: q.ok, directions: q.directions, degrees };
       // Don't spend time on alternate layouts once this read contains a solid
@@ -110,17 +110,11 @@ async function readOne(
   return { ok: true, name, text: best.text, thumb: thumbnail(rotate(prepared.image, best.degrees)) };
 }
 
-/** OCR an image and return only the confident, word-like lines. */
-async function readLines(worker: Worker, page: Gray, mode: PageSegmentationMode): Promise<string> {
+/** OCR one image region as text, preserving the engine's line order. */
+async function readText(worker: Worker, page: Gray, mode: PageSegmentationMode): Promise<string> {
   await worker.setParameters({ tessedit_pageseg_mode: mode });
-  const { data } = await worker.recognize(grayToCanvas(page), {}, { text: true, blocks: true });
-  const lines: OcrLine[] = [];
-  for (const block of data.blocks ?? []) {
-    for (const para of block.paragraphs) {
-      for (const line of para.lines) lines.push({ text: line.text, confidence: line.confidence });
-    }
-  }
-  return keepLines(lines).join("\n");
+  const { data } = await worker.recognize(grayToCanvas(page), {}, { text: true });
+  return data.text ?? "";
 }
 
 function shrink(g: Gray, longSide: number): Gray {
