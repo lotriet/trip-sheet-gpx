@@ -10,6 +10,7 @@
 
 import { preparePage, resize, rgbaToGray, rotate, rotationCandidates, type Gray } from "./ocr/prep";
 import { judgeSheetText, keepLines, RETAKE_MESSAGE, type OcrLine } from "./ocr/quality";
+import type { PSM as PageSegmentationMode } from "tesseract.js";
 
 export type PhotoResult =
   | { ok: true; name: string; text: string; /** Small JPEG of the page as read, for telling pages apart. */ thumb?: string }
@@ -41,8 +42,6 @@ export async function readSheetPhotos(
   });
   try {
     await worker.setParameters({
-      // One uniform block of text: the sheet is a single column of lines.
-      tessedit_pageseg_mode: PSM.SINGLE_BLOCK,
       user_defined_dpi: "300",
     });
     for (current = 0; current < files.length; current++) {
@@ -50,7 +49,7 @@ export async function readSheetPhotos(
       const name = (file as File).name || `Photo ${current + 1}`;
       onStatus?.(`${label()}…`);
       try {
-        results.push(await readOne(worker, file, name));
+        results.push(await readOne(worker, file, name, PSM));
       } catch (err) {
         results.push({
           ok: false,
@@ -67,7 +66,12 @@ export async function readSheetPhotos(
 
 class PhotoError extends Error {}
 
-async function readOne(worker: Worker, file: Blob, name: string): Promise<PhotoResult> {
+async function readOne(
+  worker: Worker,
+  file: Blob,
+  name: string,
+  psmModes: { AUTO: PageSegmentationMode; SINGLE_BLOCK: PageSegmentationMode },
+): Promise<PhotoResult> {
   const gray = await decodeToGray(file);
   const prepared = preparePage(gray);
   let candidates = rotationCandidates(prepared.landscape);
@@ -77,25 +81,38 @@ async function readOne(worker: Worker, file: Blob, name: string): Promise<PhotoR
     // or two instead of a full read.
     const keep: number[] = [];
     for (const degrees of candidates) {
-      const q = judgeSheetText(await readLines(worker, shrink(rotate(prepared.image, degrees), 1200)));
+      const preview = shrink(rotate(prepared.image, degrees), 1200);
+      let q = judgeSheetText(await readLines(worker, preview, psmModes.AUTO));
+      if (q.directions + q.times + (q.header ? 1 : 0) === 0) {
+        q = judgeSheetText(await readLines(worker, preview, psmModes.SINGLE_BLOCK));
+      }
       if (q.directions + q.times + (q.header ? 1 : 0) > 0) keep.push(degrees);
     }
     if (!keep.length) return { ok: false, name, reason: RETAKE_MESSAGE };
     candidates = keep;
   }
-  let best: { text: string; score: number; ok: boolean; degrees: number } | null = null;
+  let best: { text: string; score: number; ok: boolean; directions: number; degrees: number } | null = null;
   for (const degrees of candidates) {
-    const text = await readLines(worker, rotate(prepared.image, degrees));
-    const q = judgeSheetText(text);
-    if (!best || q.score > best.score) best = { text, score: q.score, ok: q.ok, degrees };
-    if (q.ok) break;
+    const page = rotate(prepared.image, degrees);
+    // Auto layout handles tables and uneven columns better; the block mode is
+    // a second chance for sheets printed as one tightly packed text block.
+    for (const psm of [psmModes.AUTO, psmModes.SINGLE_BLOCK]) {
+      const text = await readLines(worker, page, psm);
+      const q = judgeSheetText(text);
+      if (!best || q.score > best.score) best = { text, score: q.score, ok: q.ok, directions: q.directions, degrees };
+      // Don't spend time on alternate layouts once this read contains a solid
+      // set of directions. Weak or partial reads get the fallback pass.
+      if (q.ok && q.directions >= 5 && q.score >= 12) break;
+    }
+    if (best?.ok && best.directions >= 5 && best.score >= 12) break;
   }
   if (!best?.ok) return { ok: false, name, reason: RETAKE_MESSAGE };
   return { ok: true, name, text: best.text, thumb: thumbnail(rotate(prepared.image, best.degrees)) };
 }
 
 /** OCR an image and return only the confident, word-like lines. */
-async function readLines(worker: Worker, page: Gray): Promise<string> {
+async function readLines(worker: Worker, page: Gray, mode: PageSegmentationMode): Promise<string> {
+  await worker.setParameters({ tessedit_pageseg_mode: mode });
   const { data } = await worker.recognize(grayToCanvas(page), {}, { text: true, blocks: true });
   const lines: OcrLine[] = [];
   for (const block of data.blocks ?? []) {

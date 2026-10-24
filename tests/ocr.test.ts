@@ -62,3 +62,15 @@ test("refuses gibberish and accepts a sheet", () => {
     ["Right Turn Onto MAPLE AVE"],
   );
 });
+
+test("keeps low-confidence times and directions for the route editor, not noisy fragments", () => {
+  assert.deepEqual(
+    keepLines([
+      { text: "4:12 PM · HILLIARD FOREST DR", confidence: 34 },
+      { text: "Right onto MORRISVILLE PKWY", confidence: 31 },
+      { text: "Green Hope School", confidence: 44 },
+      { text: "s8 = i] 2x", confidence: 28 },
+    ]),
+    ["4:12 PM · HILLIARD FOREST DR", "Right onto MORRISVILLE PKWY", "Green Hope School"],
+  );
+});
