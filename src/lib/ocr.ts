@@ -8,7 +8,7 @@
  * than passed on as gibberish.
  */
 
-import { crop, preparePage, resize, rgbaToGray, rotate, rotationCandidates, type Gray } from "./ocr/prep";
+import { preparePage, resize, rgbaToGray, rotate, rotationCandidates, type Gray } from "./ocr/prep";
 import { judgeSheetText, keepLines, RETAKE_MESSAGE, type OcrLine } from "./ocr/quality";
 import type { PSM as PageSegmentationMode } from "tesseract.js";
 
@@ -97,7 +97,7 @@ async function readOne(
     // Auto layout handles tables and uneven columns better; the block mode is
     // a second chance for sheets printed as one tightly packed text block.
     for (const psm of [psmModes.AUTO, psmModes.SINGLE_BLOCK]) {
-      const text = await readSheetColumns(worker, page, psm, psmModes);
+      const text = await readLines(worker, page, psm);
       const q = judgeSheetText(text);
       if (!best || q.score > best.score) best = { text, score: q.score, ok: q.ok, directions: q.directions, degrees };
       // Don't spend time on alternate layouts once this read contains a solid
@@ -110,36 +110,8 @@ async function readOne(
   return { ok: true, name, text: best.text, thumb: thumbnail(rotate(prepared.image, best.degrees)) };
 }
 
-/** Read only the sheet's useful columns; the load and ID columns never enter body OCR. */
-async function readSheetColumns(
-  worker: Worker,
-  page: Gray,
-  bodyMode: PageSegmentationMode,
-  psm: { AUTO: PageSegmentationMode; SINGLE_BLOCK: PageSegmentationMode },
-): Promise<string> {
-  const headerHeight = Math.max(1, Math.round(page.height * 0.14));
-  const descriptionWidth = Math.max(1, Math.round(page.width * 0.73));
-  const header = crop(page, { x: 0, y: 0, w: page.width, h: headerHeight });
-  const body = crop(page, { x: 0, y: 0, w: descriptionWidth, h: page.height });
-
-  // Read Route/Description/Run from the short full-width banner, then read
-  // the body after physically removing Stop Load, Run Ld, and Stop ID.
-  const headerText = await readLines(worker, header, psm.SINGLE_BLOCK, 1);
-  const bodyText = await readLines(worker, body, bodyMode, 1);
-  const bodyLines = bodyText
-    .split("\n")
-    .filter((line) => !/^(?:route|description|run)\s*:/i.test(line));
-  const headerLines = headerText.split("\n").filter(Boolean);
-  return [...headerLines, ...bodyLines].join("\n");
-}
-
 /** OCR an image and return only the confident, word-like lines. */
-async function readLines(
-  worker: Worker,
-  page: Gray,
-  mode: PageSegmentationMode,
-  maxColumnFraction = 0.73,
-): Promise<string> {
+async function readLines(worker: Worker, page: Gray, mode: PageSegmentationMode): Promise<string> {
   await worker.setParameters({ tessedit_pageseg_mode: mode });
   const { data } = await worker.recognize(grayToCanvas(page), {}, { text: true, blocks: true });
   const positioned: { text: string; x: number; y: number; confidence: number }[] = [];
@@ -152,10 +124,16 @@ async function readLines(
           continue;
         }
 
-        // The full-page preview uses a positional fallback. Main OCR calls
-        // pass physically cropped regions, so this is only a safety net.
+        // The sheet's useful columns (time, description, directions) are on
+        // the left. Stop Load, Run Ld, and Stop ID occupy the far-right strip.
+        // Tesseract's line text can concatenate both sides into one string,
+        // so rebuild each line from positioned words and drop that strip.
+        // Keep the top header intact because Route/Run/Description metadata
+        // spans the full page width. This also works on continuation pages,
+        // where directions start near the top but remain in the left columns.
         for (const word of words) {
-          if (word.bbox.x0 >= page.width * maxColumnFraction) continue;
+          const isHeader = word.bbox.y1 <= page.height * 0.14;
+          if (!isHeader && word.bbox.x0 >= page.width * 0.73) continue;
           positioned.push({
             text: word.text,
             x: word.bbox.x0,
