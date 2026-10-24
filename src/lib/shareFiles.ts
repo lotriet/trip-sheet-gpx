@@ -5,6 +5,18 @@
 
 export type TextFile = { name: string; text: string };
 
+declare global {
+  interface Window {
+    TripNavGPX?: { postMessage(message: string): void };
+  }
+}
+
+export function sendNativeGpx(files: TextFile[], close = true): boolean {
+  if (typeof window === "undefined" || !window.TripNavGPX) return false;
+  window.TripNavGPX.postMessage(JSON.stringify({ files, close }));
+  return true;
+}
+
 // iOS is picky about types it will share; try the GPX type first.
 const TYPES = ["application/gpx+xml", "application/octet-stream", "text/xml"];
 
@@ -33,6 +45,7 @@ export function canShareFiles(): boolean {
 }
 
 export function downloadText(name: string, text: string, type = "application/octet-stream") {
+  if (sendNativeGpx([{ name, text }])) return;
   const url = URL.createObjectURL(new Blob([text], { type }));
   const a = document.createElement("a");
   a.href = url;
@@ -45,6 +58,7 @@ export function downloadText(name: string, text: string, type = "application/oct
 
 /** Returns "shared", "cancelled" or "downloaded". */
 export async function shareOrDownload(files: TextFile[], title: string): Promise<"shared" | "cancelled" | "downloaded"> {
+  if (sendNativeGpx(files)) return "shared";
   const list = shareableFiles(files);
   if (list) {
     try {
