@@ -2,7 +2,7 @@ import { looksLikePlace } from "./names";
 import type { Maneuver, ManeuverKind, Sheet, Stop, StopLocation } from "./types";
 
 const BOILER =
-  /driver directions|if the directions cannot|this document and information|provided in confidence|stop\s*time|stop\s*load|run\s*ld|may not be disclosed|wcpss students|report name|page\s+\d+|^\d{1,2}\/\d{1,2}\/\d{2,4}$|tims\b|medians in the roadway|one way streets|private streets/i;
+  /driver directions|if the directions cannot|this document and information|provided in confidence|stop\s*time|stop\s*load|run\s*(?:ld|load)|stop\s*(?:id|[il1]d)|may not be disclosed|wcpss students|report name|page\s+\d+|^\d{1,2}\/\d{1,2}\/\d{2,4}$|tims\b|medians in the roadway|one way streets|private streets/i;
 
 function cleanLine(s: string): string {
   return s
@@ -48,6 +48,10 @@ function trimCrumbs(s: string): string {
 
 /** A wrapped stop description is printed in capitals: street names, &, @, numbers. */
 function looksLikeDescription(line: string): boolean {
+  // The table headings sometimes arrive as separate OCR lines. They are
+  // uppercase and otherwise look like a stop description to the loose
+  // wrapped-line check below, so exclude the column vocabulary explicitly.
+  if (/\b(?:STOP\s*(?:TIME|LOAD|ID|[IL1]D)|RUN\s*(?:LD|LOAD)|DESCRIPTION)\b/i.test(line)) return false;
   const letters = line.replace(/[^A-Za-z]/g, "");
   if (letters.length < 3) return false;
   const upper = letters.replace(/[^A-Z]/g, "").length;

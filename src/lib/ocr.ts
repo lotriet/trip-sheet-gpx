@@ -117,7 +117,26 @@ async function readLines(worker: Worker, page: Gray, mode: PageSegmentationMode)
   const lines: OcrLine[] = [];
   for (const block of data.blocks ?? []) {
     for (const para of block.paragraphs) {
-      for (const line of para.lines) lines.push({ text: line.text, confidence: line.confidence });
+      for (const line of para.lines) {
+        const words = line.words ?? [];
+        if (!words.length) {
+          lines.push({ text: line.text, confidence: line.confidence });
+          continue;
+        }
+
+        // The sheet's useful columns (time, description, directions) are on
+        // the left. Stop Load, Run Ld, and Stop ID occupy the far-right strip.
+        // Tesseract's line text can concatenate both sides into one string,
+        // so rebuild each line from positioned words and drop that strip.
+        // Keep the top header intact because Route/Run/Description metadata
+        // spans the full page width. This also works on continuation pages,
+        // where directions start near the top but remain in the left columns.
+        const kept = words.filter((word) =>
+          word.bbox.y1 <= page.height * 0.14 || word.bbox.x0 < page.width * 0.73,
+        );
+        const text = kept.map((word) => word.text).join(" ").trim();
+        if (text) lines.push({ text, confidence: line.confidence });
+      }
     }
   }
   return keepLines(lines).join("\n");
