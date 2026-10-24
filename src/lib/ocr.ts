@@ -114,13 +114,13 @@ async function readOne(
 async function readLines(worker: Worker, page: Gray, mode: PageSegmentationMode): Promise<string> {
   await worker.setParameters({ tessedit_pageseg_mode: mode });
   const { data } = await worker.recognize(grayToCanvas(page), {}, { text: true, blocks: true });
-  const lines: OcrLine[] = [];
+  const positioned: { text: string; x: number; y: number; confidence: number }[] = [];
   for (const block of data.blocks ?? []) {
     for (const para of block.paragraphs) {
       for (const line of para.lines) {
         const words = line.words ?? [];
         if (!words.length) {
-          lines.push({ text: line.text, confidence: line.confidence });
+          positioned.push({ text: line.text, x: 0, y: 0, confidence: line.confidence });
           continue;
         }
 
@@ -131,14 +131,45 @@ async function readLines(worker: Worker, page: Gray, mode: PageSegmentationMode)
         // Keep the top header intact because Route/Run/Description metadata
         // spans the full page width. This also works on continuation pages,
         // where directions start near the top but remain in the left columns.
-        const kept = words.filter((word) =>
-          word.bbox.y1 <= page.height * 0.14 || word.bbox.x0 < page.width * 0.73,
-        );
-        const text = kept.map((word) => word.text).join(" ").trim();
-        if (text) lines.push({ text, confidence: line.confidence });
+        for (const word of words) {
+          const isHeader = word.bbox.y1 <= page.height * 0.14;
+          if (!isHeader && word.bbox.x0 >= page.width * 0.73) continue;
+          positioned.push({
+            text: word.text,
+            x: word.bbox.x0,
+            y: (word.bbox.y0 + word.bbox.y1) / 2,
+            confidence: word.confidence,
+          });
+        }
       }
     }
   }
+
+  // Tesseract can return separate blocks in column order (left column, then
+  // legal text, then right column) instead of page order. Reassemble the kept
+  // words into visual rows and read those rows top to bottom, left to right.
+  positioned.sort((a, b) => a.y - b.y || a.x - b.x);
+  const rowTolerance = Math.max(8, page.height * 0.007);
+  const rows: { y: number; words: typeof positioned; confidence: number }[] = [];
+  for (const word of positioned) {
+    let row = rows.at(-1);
+    if (!row || word.y - row.y > rowTolerance) {
+      row = { y: word.y, words: [], confidence: 0 };
+      rows.push(row);
+    }
+    row.words.push(word);
+  }
+
+  const boilerplate = /driver directions by route|directions cannot be run|according to tims|medians in the roadway|private streets|provided in confidence|sole purpose of transporting|may not be disclosed|third party|district office|report name|page\s+\d+|stop time\s+description|^stop$/i;
+  const lines: OcrLine[] = rows
+    .map((row) => {
+      const words = row.words.sort((a, b) => a.x - b.x);
+      return {
+        text: words.map((word) => word.text).join(" ").replace(/\s+/g, " ").trim(),
+        confidence: words.reduce((sum, word) => sum + word.confidence, 0) / Math.max(1, words.length),
+      };
+    })
+    .filter((line) => !boilerplate.test(line.text));
   return keepLines(lines).join("\n");
 }
 
