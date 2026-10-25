@@ -1074,6 +1074,7 @@ export function TripApp() {
           const warningIndex = w.level === "warn" ? issueIndex++ : undefined;
           const waypointWarning = w.message.startsWith("Couldn't find a drivable connection to the point you added");
           const mapLocationWarning = !!w.location && !waypointWarning;
+          const gapWarning = w.message.startsWith("The map has an incomplete connection");
           const stop = route.stops.find((s) => s.index === w.stopIndex);
           const destinationWarning = w.message.startsWith("Couldn't reach the last stop");
           const maneuver = destinationWarning ? undefined : sheet.stops[w.stopIndex]?.maneuvers[w.maneuverIndex];
@@ -1097,7 +1098,7 @@ export function TripApp() {
                     <Button type="button" variant="outline" className="h-10 bg-white" onClick={() => {
                       setMapFocus({ lat: w.location![1], lon: w.location![0], key: ++mapFocusKey.current });
                       document.querySelector("[data-route-map]")?.scrollIntoView({ behavior: "smooth", block: "center" });
-                    }}>Show gap on map</Button>
+                    }}>{gapWarning ? "Show gap on map" : "Show road on map"}</Button>
                   ) : (
                     <>
                       {stop && <Button type="button" variant="outline" className="h-10 bg-white" onClick={() => showWarningOnMap(w.stopIndex)}>Show stop on map</Button>}
@@ -2026,7 +2027,7 @@ export function TripApp() {
               stops={previewStops}
               turnarounds={route.turnarounds}
               warningStops={route.warnings.filter((w) => w.level === "warn").flatMap((w) => {
-                if (w.location) return [{ lat: w.location[1], lon: w.location[0], label: "Check map connection" }];
+                if (w.location) return [{ lat: w.location[1], lon: w.location[0], label: w.message.startsWith("The map has an incomplete connection") ? "Check map connection" : "Check one-way direction" }];
                 const stop = route.stops.find((s) => s.index === w.stopIndex);
                 return stop ? [{ lat: stop.lat, lon: stop.lon, label: `Check stop ${w.stopIndex + 1}` }] : [];
               })}

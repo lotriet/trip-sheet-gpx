@@ -8,6 +8,7 @@ export type GraphLine = {
   keys: string[];
   coords: LonLat[];
   oneway: number;
+  onewayKnown?: boolean;
   synthetic?: "crossing-gap" | "expected-intersection";
 };
 
@@ -20,6 +21,7 @@ export type GraphEdge = {
   coords: LonLat[];
   length: number;
   synthetic?: "crossing-gap" | "expected-intersection" | "same-road-gap";
+  onewayKnown?: boolean;
 };
 
 export type GraphNode = {
@@ -83,6 +85,7 @@ export function buildGraph(input: GraphLine[], linkKeys?: Set<string>): Graph {
       name: l.name,
       keys: [...new Set(l.keys)],
       oneway: l.oneway,
+      onewayKnown: l.onewayKnown,
       synthetic: l.synthetic,
       coords: dedupeConsecutive(l.coords.map((c) => [c[0], c[1]] as LonLat)),
     }))
@@ -155,7 +158,7 @@ export function buildGraph(input: GraphLine[], linkKeys?: Set<string>): Graph {
   }
   for (const c of connectors) {
     if (haversine(c.coords[0], c.coords[1]) < 1.2) continue;
-    pls.push({ name: c.name, keys: c.keys, oneway: 0, synthetic: c.synthetic, coords: c.coords });
+    pls.push({ name: c.name, keys: c.keys, oneway: 0, onewayKnown: false, synthetic: c.synthetic, coords: c.coords });
   }
 
   // Snap endpoints onto nearby vertices so T-intersections share a node.
@@ -234,6 +237,7 @@ export function buildGraph(input: GraphLine[], linkKeys?: Set<string>): Graph {
       coords,
       length,
       synthetic: line.synthetic,
+      onewayKnown: line.onewayKnown,
     };
     edges.push(edge);
     ensure(from, coords[0]).out.push(edge);

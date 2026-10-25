@@ -115,7 +115,7 @@ export async function decodeTiles(tiles: TileBuffer[]): Promise<{ lines: RawLine
           if (cls !== "service") continue;
           const svc = str(p.service);
           if (svc === "parking_aisle" || svc === "emergency" || str(p.access) === "no") continue;
-          lines.push({ name: "service road", keys: [], coords, kind: "service", oneway: num(p.oneway) });
+          lines.push({ name: "service road", keys: [], coords, kind: "service", oneway: num(p.oneway), onewayKnown: true });
         }
       }
     }
@@ -129,20 +129,22 @@ export async function decodeTiles(tiles: TileBuffer[]): Promise<{ lines: RawLine
         const named = namedFeatures[i];
         if (named.cls !== road.cls) continue;
         const distance = lineMatchDistance(road.coords, named.coords);
-        if (distance.maximum > 12 || distance.average > 5) continue;
+        // Keep this conservative: a nearby parallel carriageway must not lend
+        // its one-way direction to the wrong named line.
+        if (distance.maximum > 5 || distance.average > 2.5) continue;
         if (!best || distance.average < best.average) best = { index: i, average: distance.average };
       }
       if (!best) continue;
       const named = namedFeatures[best.index];
       matchedNames.add(best.index);
-      lines.push({ name: named.name, keys: named.keys, coords: road.coords, kind: "named", oneway: road.oneway });
+      lines.push({ name: named.name, keys: named.keys, coords: road.coords, kind: "named", oneway: road.oneway, onewayKnown: true });
     }
     for (let i = 0; i < namedFeatures.length; i++) {
       if (matchedNames.has(i)) continue;
       const named = namedFeatures[i];
       // Keep the named geometry available when the direction layer has no match;
       // the app's route disclaimer continues to call out incomplete one-way data.
-      lines.push({ name: named.name, keys: named.keys, coords: named.coords, kind: "named", oneway: 0 });
+      lines.push({ name: named.name, keys: named.keys, coords: named.coords, kind: "named", oneway: 0, onewayKnown: false });
     }
 
     const pois = decoded.layers.poi;

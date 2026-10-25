@@ -119,11 +119,19 @@ function lineNear(coords: LonLat[], point: LonLat, maxM: number): boolean {
   return minDistToLine(point, coords).d <= maxM;
 }
 
+function trackUsesLine(track: LonLat[], line: LonLat[]): boolean {
+  if (track.length < 2 || line.length < 2) return false;
+  const a = line[0];
+  const b = line[line.length - 1];
+  const mid: LonLat = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
+  return [a, mid, b].every((point) => minDistToLine(point, track).d <= 3);
+}
+
 /** Named streets, plus service roads around each school the sheet turns into. */
 export function prepareLines(sheet: Sheet, named: RawLine[], services: RawLine[], places: RawPlace[]): GraphLine[] {
   const lines: GraphLine[] = named
     .filter((l) => l.kind === "named" && l.keys.length && l.coords.length >= 2)
-    .map((l) => ({ name: l.name, keys: l.keys, coords: l.coords, oneway: l.oneway }));
+    .map((l) => ({ name: l.name, keys: l.keys, coords: l.coords, oneway: l.oneway, onewayKnown: l.onewayKnown }));
 
   const flat = flattenManeuvers(sheet);
   const attached = new Set<string>();
@@ -138,7 +146,7 @@ export function prepareLines(sheet: Sheet, named: RawLine[], services: RawLine[]
     attached.add(pk);
     const point: LonLat = [place.lon, place.lat];
     const near = services.filter((s) => s.coords.length >= 2 && lineNear(s.coords, point, 480) && polylineMeters(s.coords) >= 12);
-    for (const s of near) lines.push({ name: place.name, keys: [pk], coords: s.coords, oneway: 0 });
+    for (const s of near) lines.push({ name: place.name, keys: [pk], coords: s.coords, oneway: s.oneway, onewayKnown: s.onewayKnown });
 
     const prev = i > 0 ? flat[i - 1].maneuver.street : "";
     const approach = prev && !looksLikePlace(prev) ? canonicalKey(prev) : null;
@@ -156,7 +164,7 @@ export function prepareLines(sheet: Sheet, named: RawLine[], services: RawLine[]
           return best;
         };
         const hit = (approachLines.length ? pick(approachLines, 45) : null) ?? pick(fallbackLines, 30);
-        if (hit && hit.d > 1.2) lines.push({ name: place.name, keys: [pk], coords: [hit.point, end], oneway: 0 });
+        if (hit && hit.d > 1.2) lines.push({ name: place.name, keys: [pk], coords: [hit.point, end], oneway: 0, onewayKnown: false });
       }
     }
   }
@@ -982,7 +990,7 @@ async function routeFrom(
     const a = edge.coords[0];
     const b = edge.coords.at(-1)!;
     const mid: LonLat = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
-    if ([a, mid, b].some((point) => minDistToLine(point, coords).d > 3)) continue;
+    if (!trackUsesLine(coords, edge.coords)) continue;
     const key = `${mid[0].toFixed(4)},${mid[1].toFixed(4)}`;
     if (syntheticSeen.has(key)) continue;
     syntheticSeen.add(key);
@@ -994,6 +1002,26 @@ async function routeFrom(
       -1,
       `The map has an incomplete connection${road}; the route uses an assumed ${meters} m straight join. Check this point on the map.`,
       mid,
+    );
+  }
+
+  const directionUnknown = graph.edges.filter((edge) =>
+    edge.onewayKnown === false && !edge.synthetic && trackUsesLine(coords, edge.coords),
+  );
+  if (directionUnknown.length) {
+    const roads = [...new Set(directionUnknown.map((edge) => edge.name).filter(Boolean))];
+    const visible = roads.slice(0, 3).join(", ");
+    const extra = roads.length > 3 ? `, and ${roads.length - 3} more` : "";
+    const edge = directionUnknown[0];
+    const a = edge.coords[0];
+    const b = edge.coords.at(-1)!;
+    const location: LonLat = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
+    warn(
+      "warn",
+      -1,
+      -1,
+      `One-way direction data could not be confidently matched for ${visible || "one or more named roads"}${extra}. Check road signs along this route.`,
+      location,
     );
   }
 
