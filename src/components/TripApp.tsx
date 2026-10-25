@@ -855,6 +855,13 @@ export function TripApp() {
     document.querySelector("[data-route-map]")?.scrollIntoView({ behavior: "smooth", block: "center" });
   }
 
+  function showWarningOnMap(stopIndex: number) {
+    const stop = route?.stops.find((s) => s.index === stopIndex);
+    if (!stop) return;
+    setMapFocus({ lat: stop.lat, lon: stop.lon, key: ++mapFocusKey.current });
+    document.querySelector("[data-route-map]")?.scrollIntoView({ behavior: "smooth", block: "center" });
+  }
+
   function editWarning(stopIndex: number, maneuverIndex: number) {
     const maneuver = sheet.stops[stopIndex]?.maneuvers[maneuverIndex];
     if (!maneuver) return;
@@ -981,7 +988,7 @@ export function TripApp() {
       <section aria-label="Route issues" className="space-y-2">
         {issueCount > 0 && (
           <div className="flex items-center justify-between gap-3 rounded-xl border border-[#f0d28d] bg-[#fff9ea] px-3 py-2">
-            <p className="text-sm font-semibold text-[#68470b]">{warningAcknowledged ? `${issueCount} warning${issueCount === 1 ? "" : "s"} acknowledged` : `${issueCount} ${issueCount === 1 ? "issue" : "issues"} to review`}</p>
+            <p className="text-sm font-semibold text-[#68470b]">{warningAcknowledged ? `${issueCount} warning${issueCount === 1 ? "" : "s"} acknowledged · still present on route` : `${issueCount} ${issueCount === 1 ? "warning" : "warnings"} to review`}</p>
             <Button type="button" variant="outline" className="h-8 shrink-0 border-[#e5c981] bg-white px-2.5 text-xs font-semibold text-[#68470b]" onClick={() => {
               const target = warningCursor % issueCount;
               document.querySelector<HTMLElement>(`[data-route-warning="${target}"]`)?.scrollIntoView({ behavior: "smooth", block: "center" });
@@ -1001,6 +1008,7 @@ export function TripApp() {
               <p>{w.message}</p>
               {w.level === "warn" && (
                 <div className="mt-2 flex flex-wrap gap-2">
+                  {stop && <Button type="button" variant="outline" className="h-10 bg-white" onClick={() => showWarningOnMap(w.stopIndex)}>Show stop on map</Button>}
                   {stop && <Button type="button" variant="outline" className="h-10 bg-white" onClick={() => focusWarning(w.stopIndex, w.message, maneuver?.street)}>Guide on map</Button>}
                   {maneuver && <Button type="button" variant="outline" className="h-10 bg-white" onClick={() => editWarning(w.stopIndex, w.maneuverIndex)}>Edit direction</Button>}
                 </div>
@@ -1331,7 +1339,7 @@ export function TripApp() {
               </div>
               {warnings.length > 0 && (
                 <div className={`mt-3 rounded-xl border border-[#f0d28d] border-l-4 border-l-[#d28b16] p-3 ${run.warningsAcknowledged ? "bg-[#fffdf5]" : "bg-[#fff9ea]"}`} role={run.warningsAcknowledged ? "status" : "alert"}>
-                  <p className="text-xs font-bold uppercase tracking-wide text-[#80540b]">{run.warningsAcknowledged ? `Reviewed · ${warnings.length} route warning${warnings.length === 1 ? "" : "s"} remain${warnings.length === 1 ? "s" : ""}` : `Needs a quick check · ${warnings.length} ${warnings.length === 1 ? "issue" : "issues"}`}</p>
+                  <p className="text-xs font-bold uppercase tracking-wide text-[#80540b]">{run.warningsAcknowledged ? `Reviewed · ${warnings.length} warning${warnings.length === 1 ? "" : "s"} still on route` : `Needs a quick check · ${warnings.length} ${warnings.length === 1 ? "warning" : "warnings"}`}</p>
                   <p className="mt-1 text-sm leading-relaxed text-[#463716]">{warnings[0].message}</p>
                   {warnings.length > 1 && (
                     <details className="mt-1 text-sm">
@@ -1341,7 +1349,7 @@ export function TripApp() {
                       </ul>
                     </details>
                   )}
-                  <Button type="button" variant="outline" className="mt-2 h-9 border-[#e5c981] bg-white px-3 text-sm font-semibold text-[#68470b]" onClick={() => openEdit(run)} disabled={exportingDay}>Review this route</Button>
+                  <Button type="button" variant="outline" className="mt-2 h-9 border-[#e5c981] bg-white px-3 text-sm font-semibold text-[#68470b]" onClick={() => openEdit(run)} disabled={exportingDay}>{run.warningsAcknowledged ? "Recheck route" : "Review warnings"}</Button>
                 </div>
               )}
               {(run.vias?.length ?? 0) > 0 && (
@@ -1368,7 +1376,7 @@ export function TripApp() {
                   Edit
                 </Button>
                 <Button type="button" variant="outline" className="h-9 border-[#dce3ed] bg-[#f8fafc] text-xs font-semibold text-[#34445c]" onClick={() => warnings.length && !run.warningsAcknowledged ? openEdit(run) : void deliverGpx([{ name: runFileName(i, run), text: run.gpx }], runFileName(i, run), "single")}>
-                  {warnings.length && !run.warningsAcknowledged ? "Review" : "Download"}
+                  {warnings.length && !run.warningsAcknowledged ? "Review warnings" : warnings.length ? "Download reviewed GPX" : "Download GPX"}
                 </Button>
               </div>
               <details className="mt-2 border-t border-[#edf0f4] pt-2">
@@ -2019,12 +2027,15 @@ export function TripApp() {
                     Add a point on map
                   </Button>
                   {editingLockedRun ? (
-                    <Button type="button" variant="outline" className="h-9 border-[#abd0b5] bg-[#f0f8f2] text-xs font-semibold text-[#216338]" disabled={routeBuilding} onClick={goHome}>
-                      Go Home to unlock this GPX
-                    </Button>
+                    <div className="rounded-lg border border-[#abd0b5] bg-[#f0f8f2] p-2 text-xs leading-relaxed text-[#245b34]">
+                      <p>This saved GPX is protected. To replace it, return to today’s list, unlock it, then reopen it.</p>
+                      <Button type="button" variant="outline" className="mt-2 h-8 border-[#abd0b5] bg-white px-2.5 text-xs font-semibold text-[#216338]" disabled={routeBuilding} onClick={goHome}>
+                        Go to today’s list to unlock
+                      </Button>
+                    </div>
                   ) : (
                     <Button type="button" className="h-11 rounded-xl bg-[#173b64] text-sm font-bold text-white shadow-sm" disabled={routeBuilding || !!status || (route.warnings.some((w) => w.level === "warn") && !warningAcknowledged)} onClick={saveToDay}>
-                      Add to today’s list
+                      {route.warnings.some((w) => w.level === "warn") ? warningAcknowledged ? "Add reviewed route to today’s list" : "Review warnings to add route" : "Add to today’s list"}
                     </Button>
                   )}
                   <div className="grid grid-cols-2 gap-2">
@@ -2038,7 +2049,7 @@ export function TripApp() {
                       disabled={routeBuilding || !!status || (route.warnings.some((w) => w.level === "warn") && !warningAcknowledged)}
                       onClick={shareCurrentRoute}
                     >
-                      Download GPX
+                      {route.warnings.some((w) => w.level === "warn") ? warningAcknowledged ? "Download reviewed GPX" : "Review warnings to download" : "Download GPX"}
                     </Button>
                   </div>
                 </>
