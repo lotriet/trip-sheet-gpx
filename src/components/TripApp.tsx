@@ -1,7 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { ArrowUp, CornerUpLeft, CornerUpRight, LoaderCircle, RotateCcw } from "lucide-react";
+import { ArrowUp, CornerUpLeft, CornerUpRight, House, LoaderCircle, RotateCcw } from "lucide-react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -21,7 +21,7 @@ import { osrmRouter } from "@/lib/osrm";
 import { RETAKE_MESSAGE } from "@/lib/ocr/quality";
 import { loadDay, saveDay, type SavedRun } from "@/lib/storage";
 import { autoGroup, buildTrips, describePage, dropDuplicatePages, gpxFileName, mergeIntoDay, newTripKey, sortStopsByTime, splitRuns, type PageInfo, type PageRead, type Trip } from "@/lib/batch";
-import { canShareFiles, sendNativeGpx, shareOrDownload } from "@/lib/shareFiles";
+import { canShareFiles, sendNativeGpx, shareOrDownload, type TextFile } from "@/lib/shareFiles";
 import { buildStreetIndex, checkStop, checkStreet, looseName, sheetStyle, suggestFor as suggestNames } from "@/lib/streetCheck";
 
 const RouteMap = dynamic(() => import("@/components/RouteMap"), {
@@ -41,6 +41,12 @@ type EditorDraft = {
   overrides: RouteOverrides;
   warnings: Warning[];
   updatedAt: number;
+};
+type GpxNotice = {
+  files: TextFile[];
+  title: string;
+  source: "added" | "single" | "day" | "all";
+  state: "ready" | "sharing" | "shared" | "downloaded" | "cancelled";
 };
 const EDITOR_DRAFTS_KEY = "trip-sheet-gpx-editor-drafts-v1";
 
@@ -97,23 +103,6 @@ function emptySheet(): Sheet {
   return { route: "", description: "", run: "", stops: [] };
 }
 
-function downloadBlob(name: string, blob: Blob) {
-  const filename = name.toLowerCase().endsWith(".gpx") ? name : `${name.replace(/\.[^.]*$/, "")}.gpx`;
-  if (typeof window !== "undefined" && window.TripNavGPX) {
-    void blob.text().then((text) => sendNativeGpx([{ name: filename, text }]));
-    return;
-  }
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = filename;
-  a.rel = "noopener";
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 4000);
-}
-
 const noSubscribe = () => () => {};
 
 function canOfferHomeScreenInstall() {
@@ -156,6 +145,7 @@ export function TripApp() {
   const [loadError, setLoadError] = useState(false);
   const [loadAttempt, setLoadAttempt] = useState(0);
   const [stored, setStored] = useState(true);
+  const [gpxNotice, setGpxNotice] = useState<GpxNotice | null>(null);
   const saveRevision = useRef(0);
   const [status, setStatus] = useState("");
   const [routeBuilding, setRouteBuilding] = useState(false);
@@ -566,6 +556,20 @@ export function TripApp() {
     window.scrollTo(0, 0);
   }
 
+  function goHome() {
+    if (view === "edit" || view === "preview") {
+      if (reviewKey) {
+        backToTrips();
+        setView("day");
+      } else {
+        saveDraftAndBack();
+      }
+      return;
+    }
+    setView("day");
+    window.scrollTo(0, 0);
+  }
+
   function resumeDraft(draft: EditorDraft) {
     setDrafts((prev) => prev.filter((item) => item.id !== draft.id));
     setDraftId(draft.id);
@@ -925,6 +929,48 @@ export function TripApp() {
     );
   }
 
+  function renderGpxNotice() {
+    if (!gpxNotice) return null;
+    const bottom = view === "day" || view === "preview" ? "bottom-[16rem]" : "bottom-20";
+    const names = gpxNotice.files.length <= 2
+      ? gpxNotice.files.map((file) => file.name).join(" · ")
+      : `${gpxNotice.files.slice(0, 2).map((file) => file.name).join(" · ")} · +${gpxNotice.files.length - 2} more`;
+    const heading = gpxNotice.state === "ready" ? "GPX ready"
+      : gpxNotice.state === "sharing" ? "Preparing GPX…"
+        : gpxNotice.state === "downloaded" ? "GPX downloaded"
+          : gpxNotice.state === "cancelled" ? "Sharing cancelled"
+            : "GPX sent";
+    const message = gpxNotice.state === "ready"
+      ? "The run is on today’s list. Share it to open in OsmAnd or save it to Files."
+      : gpxNotice.state === "sharing"
+        ? "Opening the phone’s share options…"
+        : gpxNotice.state === "downloaded"
+          ? "Find the file in Downloads or Files, then open it with OsmAnd."
+          : gpxNotice.state === "cancelled"
+            ? gpxNotice.source === "single" ? "The route is still available; you can share it again." : "Your run is still saved in today’s list."
+            : "Choose OsmAnd to open the track, or Save to Files for later.";
+    return (
+      <div className={`fixed inset-x-0 ${bottom} z-[1300] px-3`} role="status" aria-live="polite">
+        <div className="mx-auto flex max-w-2xl items-center justify-between gap-3 rounded-xl border border-[#cbd9eb] bg-white p-3 text-[#17243a] shadow-xl">
+          <div className="min-w-0">
+            <p className="text-sm font-bold">{heading}</p>
+            <p className="truncate text-xs font-medium text-[#315d8c]">{names}</p>
+            <p className="mt-0.5 text-xs leading-relaxed text-[#53627a]">{message}</p>
+          </div>
+          <div className="flex shrink-0 items-center gap-1.5">
+            {(gpxNotice.state === "ready" || gpxNotice.state === "cancelled") && (
+              <Button type="button" className="h-9 bg-[#173b64] px-2.5 text-xs font-semibold text-white" onClick={shareGpxNotice}>
+                {gpxNotice.state === "ready" ? "Share / open" : "Try again"}
+              </Button>
+            )}
+            {gpxNotice.state === "sharing" && <LoaderCircle aria-label="Preparing GPX" className="h-5 w-5 animate-spin text-[#315d8c]" />}
+            <button type="button" className="h-8 w-8 rounded-lg text-sm text-[#53627a] hover:bg-[#edf3fa]" aria-label="Dismiss GPX message" onClick={() => setGpxNotice(null)}>×</button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   function renderWarnings() {
     if (!route) return null;
     const issueCount = route.warnings.filter((warning) => warning.level === "warn").length;
@@ -993,10 +1039,12 @@ export function TripApp() {
     }
     const saved = savedRunFrom(editingId ?? newId(), text, sheet, route, overrides.vias ?? []);
     const willFinishReview = !reviewKey || trips.every((trip) => trip.key === reviewKey || tripStates[trip.key]?.state === "added");
-    sendNativeGpx([{
+    const file = {
       name: runFileName(0, { run: saved.run, description: saved.description, firstTime: saved.firstTime }),
       text: saved.gpx,
-    }], willFinishReview);
+    };
+    const sentToPhone = sendNativeGpx([file], willFinishReview);
+    setGpxNotice({ files: [file], title: file.name, source: "added", state: sentToPhone ? "shared" : "ready" });
     setMapRun(saved.id);
     if (reviewKey) {
       // Built from the review list: add it to the day by time and go back to the other trips.
@@ -1045,13 +1093,35 @@ export function TripApp() {
     setRuns((prev) => prev.filter((item) => item.id !== run.id));
   }
 
+  async function deliverGpx(files: TextFile[], title: string, source: GpxNotice["source"]) {
+    setGpxNotice({ files, title, source, state: "sharing" });
+    try {
+      const result = await shareOrDownload(files, title);
+      setGpxNotice({ files, title, source, state: result });
+    } catch (err) {
+      setGpxNotice(null);
+      setError(err instanceof Error ? err.message : "The GPX could not be shared or downloaded.");
+    }
+  }
+
+  function shareGpxNotice() {
+    if (!gpxNotice || gpxNotice.state === "sharing") return;
+    void deliverGpx(gpxNotice.files, gpxNotice.title, gpxNotice.source);
+  }
+
+  function shareCurrentRoute() {
+    if (!route) return;
+    const name = runFileName(0, { run: sheet.run, description: sheet.description, firstTime: sheet.stops[0]?.time ?? "" });
+    void deliverGpx([{ name, text: buildGpx(sheet, route.coords, route.stops) }], name, "single");
+  }
+
   async function shareAll() {
     if (!runs.length) return;
     if (!confirmDayOrder()) return;
     setError("");
     const used = new Set<string>();
     const files = runs.map((run, i) => ({ name: gpxFileName(run.run, i, used), text: run.gpx }));
-    await shareOrDownload(files, `${files.length} runs`);
+    await deliverGpx(files, `${files.length} runs`, "all");
   }
 
   async function exportDay() {
@@ -1081,7 +1151,8 @@ export function TripApp() {
       setStatus("");
       if (!confirmDayOrder(deadheads, exportRuns)) return;
       const gpx = buildDayGpx(exportRuns, deadheads);
-      downloadBlob(`day_${exportRuns.length}_runs.gpx`, new Blob([gpx], { type: "application/octet-stream" }));
+      const name = `day_${exportRuns.length}_runs.gpx`;
+      await deliverGpx([{ name, text: gpx }], name, "day");
     } catch (err) {
       setError(err instanceof Error ? err.message : "The day’s GPX could not be built.");
     } finally {
@@ -1141,9 +1212,16 @@ export function TripApp() {
     <main className="mx-auto flex min-h-dvh w-full max-w-2xl flex-col bg-[#f3f5f8] text-[#17243a]">
       <header className="border-b border-[#d9e0ea] bg-[#10233f] px-4 py-3 text-white shadow-sm">
         <div className="flex items-center justify-between gap-3">
-          <div className="min-w-0">
-            <p className="text-[0.68rem] font-bold uppercase tracking-[0.16em] text-[#eec85c]">Trip Sheet GPX</p>
-            <h1 className="mt-0.5 truncate text-xl font-semibold leading-tight">{screenTitle}</h1>
+          <div className="flex min-w-0 items-center gap-2.5">
+            {view !== "day" && (
+              <button type="button" className="flex h-9 shrink-0 items-center gap-1.5 rounded-lg border border-white/25 bg-white/10 px-2.5 text-xs font-semibold text-white hover:bg-white/15" onClick={goHome} aria-label="Go to today’s runs">
+                <House aria-hidden="true" className="h-4 w-4" /> Home
+              </button>
+            )}
+            <div className="min-w-0">
+              <p className="text-[0.68rem] font-bold uppercase tracking-[0.16em] text-[#eec85c]">Trip Sheet GPX</p>
+              <h1 className="mt-0.5 truncate text-xl font-semibold leading-tight">{screenTitle}</h1>
+            </div>
           </div>
           {view === "day" && runs.length > 0 && (
             <span className="shrink-0 rounded-full border border-white/20 bg-white/10 px-3 py-1 text-xs font-semibold text-white">{runs.length} {runs.length === 1 ? "run" : "runs"}</span>
@@ -1287,7 +1365,7 @@ export function TripApp() {
                 <Button type="button" variant="outline" className="h-9 border-[#dce3ed] bg-[#f8fafc] text-xs font-semibold text-[#34445c]" onClick={() => openEdit(run)} disabled={exportingDay}>
                   Edit
                 </Button>
-                <Button type="button" variant="outline" className="h-9 border-[#dce3ed] bg-[#f8fafc] text-xs font-semibold text-[#34445c]" onClick={() => downloadBlob(runFileName(i, run), new Blob([run.gpx], { type: "application/octet-stream" }))}>
+                <Button type="button" variant="outline" className="h-9 border-[#dce3ed] bg-[#f8fafc] text-xs font-semibold text-[#34445c]" onClick={() => void deliverGpx([{ name: runFileName(i, run), text: run.gpx }], runFileName(i, run), "single")}>
                   Download
                 </Button>
               </div>
@@ -1756,17 +1834,6 @@ export function TripApp() {
             Check this track before driving. One-way directions and bus restrictions may be missing from map data; turnaround points are estimates. Follow the trip sheet and road signs.
           </p>
           {renderWarnings()}
-          {route.warnings.some((w) => w.level === "warn") && (
-            <label className="flex items-start gap-3 rounded-lg border-2 border-[#9a3412] bg-[#fff7ed] p-3 text-sm font-medium">
-              <input
-                type="checkbox"
-                className="mt-1 h-5 w-5 shrink-0 accent-[#0f2744]"
-                checked={warningAcknowledged}
-                onChange={(e) => setWarningAcknowledged(e.target.checked)}
-              />
-              <span>I checked each warning against the trip sheet and road layout.</span>
-            </label>
-          )}
           <div className="relative overflow-hidden rounded-2xl border border-[#dce3ec] bg-white p-1.5 shadow-[0_5px_18px_rgba(24,39,62,0.1)]" data-route-map>
             <RouteMap
               coords={route.coords}
@@ -1924,6 +1991,12 @@ export function TripApp() {
           <div className="fixed inset-x-0 bottom-0 z-[1200] border-t border-[#dce3ec] bg-white p-3 shadow-[0_-8px_28px_rgba(24,39,62,0.12)]">
             <div className="mx-auto flex max-w-2xl flex-col gap-2">
               {routeBuilding && <RouteBuildStatus message={status} />}
+              {route.warnings.some((warning) => warning.level === "warn") && (
+                <label className="flex cursor-pointer items-center gap-2 rounded-lg border border-[#e5bd77] bg-[#fff8e9] px-2.5 py-2 text-xs text-[#59451f]">
+                  <input type="checkbox" className="h-4 w-4 shrink-0 accent-[#173b64]" checked={warningAcknowledged} onChange={(e) => setWarningAcknowledged(e.target.checked)} />
+                  <span><strong>Review {route.warnings.filter((warning) => warning.level === "warn").length} warning{route.warnings.filter((warning) => warning.level === "warn").length === 1 ? "" : "s"}</strong><span className="ml-1">to enable GPX export.</span></span>
+                </label>
+              )}
               {tapMode !== null ? (
                 <Button
                   type="button"
@@ -1943,10 +2016,15 @@ export function TripApp() {
                   >
                     Add a point on map
                   </Button>
-                  {editingLockedRun && <p className="rounded-lg border border-[#246b36] bg-[#e8f3e8] p-2 text-sm text-[#173b22]">This GPX is locked. Your saved track stays safe; unlock it from today’s list before replacing it with this route.</p>}
-                  <Button type="button" className="h-11 rounded-xl bg-[#173b64] text-sm font-bold text-white shadow-sm" disabled={routeBuilding || !!status || editingLockedRun || (route.warnings.some((w) => w.level === "warn") && !warningAcknowledged)} onClick={saveToDay}>
-                    {editingLockedRun ? "Unlock GPX to replace it" : "Add to today’s list"}
-                  </Button>
+                  {editingLockedRun ? (
+                    <Button type="button" variant="outline" className="h-9 border-[#abd0b5] bg-[#f0f8f2] text-xs font-semibold text-[#216338]" disabled={routeBuilding} onClick={goHome}>
+                      Go Home to unlock this GPX
+                    </Button>
+                  ) : (
+                    <Button type="button" className="h-11 rounded-xl bg-[#173b64] text-sm font-bold text-white shadow-sm" disabled={routeBuilding || !!status || (route.warnings.some((w) => w.level === "warn") && !warningAcknowledged)} onClick={saveToDay}>
+                      Add to today’s list
+                    </Button>
+                  )}
                   <div className="grid grid-cols-2 gap-2">
                     <Button type="button" variant="outline" className="h-12" onClick={() => setView("edit")}>
                       Edit directions
@@ -1956,16 +2034,7 @@ export function TripApp() {
                       variant="outline"
                       className="h-12"
                       disabled={routeBuilding || !!status || (route.warnings.some((w) => w.level === "warn") && !warningAcknowledged)}
-                      onClick={() =>
-                        downloadBlob(
-                          runFileName(0, {
-                            run: sheet.run,
-                            description: sheet.description,
-                            firstTime: sheet.stops[0]?.time ?? "",
-                          }),
-                          new Blob([buildGpx(sheet, route.coords, route.stops)], { type: "application/octet-stream" }),
-                        )
-                      }
+                      onClick={shareCurrentRoute}
                     >
                       Download GPX
                     </Button>
@@ -1976,6 +2045,7 @@ export function TripApp() {
           </div>
         </section>
       )}
+      {renderGpxNotice()}
     </main>
   );
 }
