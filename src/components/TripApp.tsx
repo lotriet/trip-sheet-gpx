@@ -1308,7 +1308,7 @@ export function TripApp() {
           >
           <label className="text-sm font-medium">
             Area
-            <Input className="mt-1 h-12 bg-white text-base" value={area} onChange={(e) => setArea(e.target.value)} />
+            <Input className="mt-1 h-9 bg-white text-sm" value={area} onChange={(e) => setArea(e.target.value)} />
           </label>
           {editWarnings.length > 0 && (
             <p className="rounded-lg border border-[#b93816] bg-[#fff7ed] px-3 py-2 text-sm text-[#7f1d1d]">
@@ -1335,11 +1335,11 @@ export function TripApp() {
             <WrapField className="mt-1 font-mono" multiline value={text} label="Sheet text" placeholder="Paste the trip sheet, or it will fill in from the photos." onChange={setText} />
           </label>
           <div className="flex gap-2">
-            <Button type="button" variant="outline" className="h-11 flex-1" onClick={readPasted}>
+            <Button type="button" variant="outline" className="h-9 flex-1 text-sm" onClick={readPasted}>
               Read the text
             </Button>
             {!reviewTrip && (
-              <Button type="button" variant="outline" className="h-11 flex-1" onClick={() => applyText(EXAMPLE_SHEET_TEXT)}>
+              <Button type="button" variant="outline" className="h-9 flex-1 text-sm" onClick={() => applyText(EXAMPLE_SHEET_TEXT)}>
                 Load a fake example
               </Button>
             )}
@@ -1379,8 +1379,8 @@ export function TripApp() {
           {sheet.stops.length > 0 && (
               <div className="space-y-1.5">
               <div className="grid grid-cols-2 gap-2">
-                <Input className="h-9 bg-white text-base" value={sheet.route} placeholder="Route" aria-label="Route" onChange={(e) => setSheet({ ...sheet, route: e.target.value })} />
-                <Input className="h-9 bg-white text-base" value={sheet.run} placeholder="Run" aria-label="Run" onChange={(e) => setSheet({ ...sheet, run: e.target.value })} />
+                <Input className="h-9 bg-white text-sm" value={sheet.route} placeholder="Route" aria-label="Route" onChange={(e) => setSheet({ ...sheet, route: e.target.value })} />
+                <Input className="h-9 bg-white text-sm" value={sheet.run} placeholder="Run" aria-label="Run" onChange={(e) => setSheet({ ...sheet, run: e.target.value })} />
               </div>
               <WrapField
                 value={sheet.description}
@@ -1405,7 +1405,7 @@ export function TripApp() {
                       </button>
                     </div>
                     <div className="flex items-end gap-2">
-                      <Input className="h-9 w-32 shrink-0 bg-white text-base" value={stop.time} aria-label="Stop time" onChange={(e) => setSheet({ ...sheet, stops: sheet.stops.map((s, i) => (i === si ? { ...s, time: e.target.value } : s)) })} />
+                      <Input className="h-9 w-28 shrink-0 bg-white text-sm" value={stop.time} aria-label="Stop time" onChange={(e) => setSheet({ ...sheet, stops: sheet.stops.map((s, i) => (i === si ? { ...s, time: e.target.value } : s)) })} />
                       <StreetMark state={stopCheck.state} open={suggestFor === sid} onTap={() => void tapMark(sid, stopCheck.missing)} />
                     </div>
                     <WrapField
@@ -1446,9 +1446,9 @@ export function TripApp() {
                           : null;
                         const nearbyTargetRoad = targetRoad && targetRoad.distance <= 0.015 ? targetRoad : null;
                         return (
-                          <li key={mi} className="grid grid-cols-[minmax(0,1fr)_2rem_2.25rem] items-center gap-1.5 rounded-xl border border-[#e1e7ef] bg-white p-2 shadow-[0_1px_2px_rgba(24,39,62,0.04)] sm:grid-cols-[minmax(0,0.85fr)_minmax(0,1fr)_2rem_2.25rem]">
+                          <li key={mi} className="grid grid-cols-[minmax(0,1fr)_1.75rem_1.9rem] items-center gap-1 rounded-lg border border-[#e1e7ef] bg-white p-1.5 shadow-[0_1px_2px_rgba(24,39,62,0.04)] sm:grid-cols-[minmax(0,0.85fr)_minmax(0,1fr)_1.75rem_1.9rem]">
                               <select
-                                className="h-10 min-w-0 rounded-lg border border-[#cbd5e1] bg-[#f8fafc] px-2 text-sm font-medium text-[#17243a]"
+                                className="h-9 min-w-0 rounded-md border border-[#cbd5e1] bg-[#f8fafc] px-1.5 text-sm font-medium text-[#17243a]"
                                 value={m.kind}
                                 aria-label="Direction"
                                 onChange={(e) => updateManeuver(si, mi, { kind: e.target.value as ManeuverKind })}
@@ -1460,7 +1460,7 @@ export function TripApp() {
                                 ))}
                               </select>
                               <WrapField
-                                className="col-span-3 row-start-2 min-h-10 px-2 py-1 text-sm sm:col-span-1 sm:row-auto sm:text-base"
+                                className="col-span-3 row-start-2 min-h-9 px-2 py-1 text-sm sm:col-span-1 sm:row-auto sm:text-sm"
                                 value={m.street}
                                 label="Street"
                                 placeholder="Street name"
@@ -1472,7 +1472,7 @@ export function TripApp() {
                               </div>
                               <button
                                 type="button"
-                                className="col-start-3 row-start-1 h-10 w-10 touch-manipulation rounded-lg border border-[#edd5d2] bg-white text-sm text-[#8f2c1c] sm:col-auto sm:row-auto"
+                                className="col-start-3 row-start-1 h-8 w-8 touch-manipulation rounded-md border border-[#edd5d2] bg-white text-xs text-[#8f2c1c] sm:col-auto sm:row-auto"
                                 aria-label="Delete this direction"
                                 onClick={() => setSheet({ ...sheet, stops: sheet.stops.map((s, i) => (i === si ? { ...s, maneuvers: s.maneuvers.filter((_, j) => j !== mi) } : s)) })}
                               >
@@ -1867,7 +1867,7 @@ function WrapField({
       autoCorrect="off"
       autoCapitalize="off"
       enterKeyHint={multiline ? "enter" : "done"}
-      className={`block w-full min-h-9 resize-none overflow-hidden rounded-lg border border-[#d9d2c3] bg-white px-3 py-1.5 text-base leading-snug break-words whitespace-pre-wrap ${multiline ? "min-h-36" : ""} ${className}`}
+      className={`block w-full min-h-9 resize-none overflow-hidden rounded-lg border border-[#d9d2c3] bg-white px-3 py-1.5 text-sm leading-snug whitespace-pre-wrap [overflow-wrap:normal] ${multiline ? "min-h-36" : ""} ${className}`}
       onChange={(e) => {
         onChange(multiline ? e.target.value : e.target.value.replace(/\n/g, " "));
         fit(e.currentTarget);
@@ -1936,12 +1936,12 @@ function SuggestPanel({
 }) {
   if (!names.length) return null;
   return (
-    <div className="w-full rounded-lg bg-[#fef2f2] p-2" data-suggest>
+    <div className="col-span-3 w-full min-w-0 rounded-lg bg-[#fef2f2] p-2 sm:col-span-4" data-suggest>
       {names.map((part) => {
         const options = looking ? [] : suggest(part);
         return (
           <div key={part} className="mb-1">
-            <p className="text-sm">
+            <p className="text-xs leading-relaxed">
               {looking
                 ? `Looking up ${part} near this run…`
                 : options.length
@@ -1953,7 +1953,7 @@ function SuggestPanel({
                 <button
                   key={name}
                   type="button"
-                  className="h-11 touch-manipulation rounded-lg border border-[#d9d2c3] bg-white px-3 text-left text-base"
+                  className="min-h-9 touch-manipulation rounded-lg border border-[#d9d2c3] bg-white px-2.5 py-1 text-left text-sm leading-snug"
                   onClick={() => onPick(part, name)}
                 >
                   {name}
