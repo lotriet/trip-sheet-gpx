@@ -32,19 +32,25 @@ type View = "day" | "edit" | "preview" | "review";
 
 type TripState = { state: "building" | "added" | "failed"; message?: string };
 
-function nearestStreetLine(lines: RawLine[], street: string, lat: number, lon: number): { line: RawLine; point: LonLat; distance: number } | null {
+function nearbyStreetLines(lines: RawLine[], street: string, lat: number, lon: number): { lines: RawLine[]; point: LonLat; distance: number } | null {
   const key = canonicalKey(street);
   const candidates = lines.filter((line) => canonicalKey(line.name) === key || line.keys.some((lineKey) => canonicalKey(lineKey) === key));
-  let nearest: { line: RawLine; point: LonLat; distance: number } | null = null;
+  const matches: { line: RawLine; point: LonLat; distance: number }[] = [];
   for (const line of candidates) {
+    let closest: { line: RawLine; point: LonLat; distance: number } | null = null;
     for (const point of line.coords) {
       const dx = (point[0] - lon) * Math.cos((lat * Math.PI) / 180);
       const dy = point[1] - lat;
       const distance = Math.hypot(dx, dy);
-      if (!nearest || distance < nearest.distance) nearest = { line, point, distance };
+      if (!closest || distance < closest.distance) closest = { line, point, distance };
     }
+    if (closest) matches.push(closest);
   }
-  return nearest;
+  matches.sort((a, b) => a.distance - b.distance);
+  const nearest = matches[0];
+  if (!nearest) return null;
+  const linesNearStop = matches.filter((match) => match.distance <= 0.015).map((match) => match.line);
+  return { lines: linesNearStop, point: nearest.point, distance: nearest.distance };
 }
 
 const KINDS: ManeuverKind[] = ["proceed", "left", "right", "turnaround"];
@@ -1277,7 +1283,7 @@ export function TripApp() {
                         const warned = editWarnings.some((w) => w.stopIndex === si && w.maneuverIndex === mi);
                         const savedStop = editingRun?.stops[si];
                         const targetRoad = warned && savedStop && mapData && loadedArea === area
-                          ? nearestStreetLine(mapData.lines, st.label ?? m.street, savedStop.lat, savedStop.lon)
+                          ? nearbyStreetLines(mapData.lines, st.label ?? m.street, savedStop.lat, savedStop.lon)
                           : null;
                         const nearbyTargetRoad = targetRoad && targetRoad.distance <= 0.015 ? targetRoad : null;
                         return (
@@ -1334,8 +1340,11 @@ export function TripApp() {
                                     {directionMapStop === si && (
                                       <div className="mt-2 rounded-lg bg-white p-2" data-direction-map>
                                         <div className="mb-2 space-y-1 text-xs text-[#3d4b63]">
-                                          <p><span className="font-semibold text-[#be123c]">Pink dashed line:</span> {nearbyTargetRoad?.line.name || m.street}</p>
+                                          <p><span className="font-semibold text-[#be123c]">Pink dashed lines:</span> map match for {m.street}</p>
                                           <p><span className="font-semibold text-[#0f2744]">Dark line:</span> saved route · <span className="font-semibold text-[#b91c1c]">Red ring:</span> this stop</p>
+                                          {nearbyTargetRoad && canonicalKey(m.street).includes("GREEN LEVEL WEST")
+                                            ? <p>Here the map labels this corridor High House Road; the trip sheet calls it Green Level West Road. Check that the highlighted road is the intended turn.</p>
+                                            : nearbyTargetRoad && <p>Map labels can use another name for a shared road; the pink line is the routing data’s match for the trip-sheet name.</p>}
                                           {!mapData || loadedArea !== area
                                             ? <p>Loading street data…</p>
                                             : !nearbyTargetRoad && <p className="text-[#7f1d1d]">The named road isn’t in the local map data near this stop, so it can’t be highlighted. Zoom out to inspect nearby roads.</p>}
@@ -1345,9 +1354,19 @@ export function TripApp() {
                                           stops={editingRun.stops.map((savedStop, stopIndex) => ({ lat: savedStop.lat, lon: savedStop.lon, label: `Stop ${stopIndex + 1}: ${savedStop.description}` }))}
                                           turnarounds={[]}
                                           warningStops={editingRun.stops[si] ? [{ lat: editingRun.stops[si].lat, lon: editingRun.stops[si].lon, label: `Check stop ${si + 1}` }] : []}
-                                          highlightedLines={nearbyTargetRoad ? [nearbyTargetRoad.line.coords] : []}
+                                          highlightedLines={nearbyTargetRoad ? nearbyTargetRoad.lines.map((line) => line.coords) : []}
                                           focusArea={savedStop && nearbyTargetRoad ? [[savedStop.lon, savedStop.lat], nearbyTargetRoad.point] : undefined}
                                         />
+                                        {savedStop && (
+                                          <a
+                                            className="mt-2 inline-flex min-h-10 items-center rounded-md border border-[#d9d2c3] px-3 text-sm font-medium text-[#142033] underline"
+                                            href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${m.street} near ${savedStop.description}, ${area}`)}`}
+                                            target="_blank"
+                                            rel="noreferrer"
+                                          >
+                                            Compare this road in Google Maps
+                                          </a>
+                                        )}
                                       </div>
                                     )}
                                   </>
