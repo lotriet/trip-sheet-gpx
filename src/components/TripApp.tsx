@@ -1,6 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
+import { ArrowUp, CornerUpLeft, CornerUpRight, RotateCcw } from "lucide-react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -71,6 +72,17 @@ const KIND_LABEL: Record<ManeuverKind, string> = {
   right: "Right onto",
   turnaround: "Turn around on",
 };
+
+function ManeuverArrow({ kind }: { kind: ManeuverKind }) {
+  const Icon = kind === "left"
+    ? CornerUpLeft
+    : kind === "right"
+      ? CornerUpRight
+      : kind === "turnaround"
+        ? RotateCcw
+        : ArrowUp;
+  return <Icon aria-hidden="true" className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[#315d8c]" strokeWidth={2.5} />;
+}
 
 function emptySheet(): Sheet {
   return { route: "", description: "", run: "", stops: [] };
@@ -1447,18 +1459,21 @@ export function TripApp() {
                         const nearbyTargetRoad = targetRoad && targetRoad.distance <= 0.015 ? targetRoad : null;
                         return (
                           <li key={mi} className="grid grid-cols-[minmax(0,1fr)_1.75rem_1.9rem] items-center gap-1 rounded-lg border border-[#e1e7ef] bg-white p-1.5 shadow-[0_1px_2px_rgba(24,39,62,0.04)] sm:grid-cols-[minmax(0,0.85fr)_minmax(0,1fr)_1.75rem_1.9rem]">
-                              <select
-                                className="h-8 min-w-0 rounded-md border border-[#cbd5e1] bg-[#f8fafc] px-1.5 text-[13px] font-medium leading-tight text-[#17243a]"
-                                value={m.kind}
-                                aria-label="Direction"
-                                onChange={(e) => updateManeuver(si, mi, { kind: e.target.value as ManeuverKind })}
-                              >
-                                {KINDS.map((k) => (
-                                  <option key={k} value={k}>
-                                    {KIND_LABEL[k]}
-                                  </option>
-                                ))}
-                              </select>
+                              <div className="relative min-w-0">
+                                <ManeuverArrow kind={m.kind} />
+                                <select
+                                  className="h-8 w-full min-w-0 rounded-md border border-[#cbd5e1] bg-[#f8fafc] py-1 pl-7 pr-1 text-[13px] font-medium leading-tight text-[#17243a]"
+                                  value={m.kind}
+                                  aria-label="Direction"
+                                  onChange={(e) => updateManeuver(si, mi, { kind: e.target.value as ManeuverKind })}
+                                >
+                                  {KINDS.map((k) => (
+                                    <option key={k} value={k}>
+                                      {KIND_LABEL[k]}
+                                    </option>
+                                  ))}
+                                </select>
+                              </div>
                               <WrapField
                                 className="col-span-3 row-start-2 min-h-8 px-2 py-1 text-[13px] leading-tight sm:col-span-1 sm:row-auto"
                                 value={m.street}
