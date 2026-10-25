@@ -62,7 +62,7 @@ export function driveBetween(
   const graph = buildGraph(
     lines
       .filter((l) => l.kind === "named" && l.keys.length && l.coords.length >= 2)
-      .map((l) => ({ name: l.name, keys: l.keys, coords: l.coords, oneway: l.oneway })),
+      .map((l) => ({ name: l.name, keys: l.keys, coords: l.coords, oneway: l.oneway, onewayKnown: l.onewayKnown })),
   );
   const start = nearest(graph, from, 180);
   const goal = nearest(graph, to, 180);

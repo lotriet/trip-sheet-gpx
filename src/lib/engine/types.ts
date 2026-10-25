@@ -40,6 +40,8 @@ export type RawLine = {
   coords: LonLat[];
   kind: "named" | "service";
   oneway: number;
+  /** False when named geometry could not be safely paired to direction-bearing geometry. */
+  onewayKnown?: boolean;
 };
 
 export type RawPlace = {
