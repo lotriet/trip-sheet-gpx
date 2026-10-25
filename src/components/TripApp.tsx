@@ -1760,6 +1760,7 @@ export function TripApp() {
               {sheet.stops.map((stop, si) => {
                 const stopCheck = stopState(stop.description);
                 const sid = `stop-${si}`;
+                const stopPlacementWarnings = editWarnings.filter((w) => w.stopIndex === si && w.maneuverIndex < 0);
                 return (
                   <div key={si} className="rounded-2xl border border-[#dce3ec] border-l-[3px] border-l-[#315d8c] bg-white p-3 shadow-[0_3px_12px_rgba(24,39,62,0.06)]" data-stop={si}>
                     <div className="mb-2 flex items-center justify-between gap-2 border-b border-[#ece7dc] pb-1.5">
@@ -1786,6 +1787,39 @@ export function TripApp() {
                       onBlur={() => void recheckSoon()}
                     />
                     {stopCheck.label && <p className="mt-1 text-xs text-[#15803d]">On the map: {stopCheck.label}</p>}
+                    {stopPlacementWarnings.map((warning, wi) => (
+                      <div key={`stop-placement-warning-${wi}`} className="mt-2 rounded-lg border border-[#f0c36d] bg-[#fff6e5] p-2.5 text-sm text-[#7f1d1d]">
+                        <p role="alert">Route warning: {warning.message}</p>
+                        {editingRun && editingRun.coords.length > 1 && (
+                          <>
+                            <Button
+                              type="button"
+                              variant="outline"
+                              className="mt-2 h-9 border-[#d9d2c3] bg-white text-xs text-[#142033]"
+                              aria-expanded={directionMapStop === si}
+                              onClick={() => {
+                                const opening = directionMapStop !== si;
+                                setDirectionMapStop(opening ? si : null);
+                                if (opening) requestAnimationFrame(() => document.querySelector("[data-direction-map]")?.scrollIntoView({ behavior: "smooth", block: "center" }));
+                              }}
+                            >
+                              {directionMapStop === si ? "Hide map" : "See stop on map"}
+                            </Button>
+                            {directionMapStop === si && (
+                              <div className="mt-2 rounded-lg bg-white p-2" data-direction-map>
+                                <p className="mb-2 text-xs text-[#3d4b63]">Red marker: the stop position saved in this GPX · dark line: saved track.</p>
+                                <RouteMap
+                                  coords={editingRun.coords}
+                                  stops={editingRun.stops.map((savedStop, stopIndex) => ({ lat: savedStop.lat, lon: savedStop.lon, label: `Stop ${stopIndex + 1}: ${savedStop.description}` }))}
+                                  turnarounds={[]}
+                                  warningStops={editingRun.stops[si] ? [{ lat: editingRun.stops[si].lat, lon: editingRun.stops[si].lon, label: `Check stop ${si + 1}` }] : []}
+                                />
+                              </div>
+                            )}
+                          </>
+                        )}
+                      </div>
+                    ))}
                     {suggestFor === sid && (
                       <SuggestPanel
                         names={stopCheck.missing}

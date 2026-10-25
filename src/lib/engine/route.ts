@@ -969,15 +969,16 @@ async function routeFrom(
   const viaStreets = (overrides.vias ?? []).map((v) => nearestStreetName(graph, [v.lon, v.lat]));
 
   // Place stops along the finished track.
-  const placed = placeStops(sheet, coords, anchors, graph, available, places);
+  const placement = placeStops(sheet, coords, anchors, graph, available, places);
+  warnings.push(...placement.warnings);
   const meters = polylineMeters(coords);
-  const gpx = buildGpx(sheet, coords, placed);
+  const gpx = buildGpx(sheet, coords, placement.stops);
   return {
     ok: true,
     coords,
     meters,
     miles: meters / 1609.344,
-    stops: placed,
+    stops: placement.stops,
     warnings,
     turnarounds,
     legs,
@@ -1061,8 +1062,9 @@ function placeStops(
   graph: Graph,
   available: Set<string>,
   places: RawPlace[],
-): RouteSuccess["stops"] {
+): { stops: RouteSuccess["stops"]; warnings: Warning[] } {
   const out: RouteSuccess["stops"] = [];
+  const warnings: Warning[] = [];
   let minAt = 0;
   sheet.stops.forEach((stop, index) => {
     const loc = classifyLocation(stop.description);
@@ -1077,35 +1079,45 @@ function placeStops(
       const key = p ? placeRouteKey(p) : "";
       const anchor = anchors.find((a) => a.key === key && a.at >= Math.max(0, minAt - 2));
       if (anchor) {
-        coord = anchor.coord;
-        at = anchor.at;
+        at = Math.max(minAt, Math.min(anchor.at, track.length - 1));
+        coord = track[at] ?? anchor.coord;
+      } else if (p) {
+        const hit = nearestIndex(track, [p.lon, p.lat], minAt);
+        if (hit.d <= 350) {
+          at = hit.index;
+          coord = track[at];
+        } else {
+          warnings.push({ level: "warn", stopIndex: index, maneuverIndex: -1, message: `Couldn't place the SCHOOL stop “${stop.description}” near its mapped location on the route. Check this stop marker.` });
+        }
+      } else {
+        warnings.push({ level: "warn", stopIndex: index, maneuverIndex: -1, message: `Couldn't match the SCHOOL stop “${stop.description}” to a place on the map. Check this stop marker.` });
       }
     } else if (loc.kind === "end") {
       const key = resolveTarget(loc.street, available, places).key;
       const anchor = [...anchors].reverse().find((a) => a.key === key && a.at >= Math.max(0, minAt - 2));
       if (anchor) {
-        coord = anchor.coord;
-        at = anchor.at;
+        at = Math.max(minAt, Math.min(anchor.at, track.length - 1));
+        coord = track[at] ?? anchor.coord;
+      } else {
+        warnings.push({ level: "warn", stopIndex: index, maneuverIndex: -1, message: `Couldn't confirm the end-of-street location for stop “${stop.description}” on the route. Check this stop marker.` });
       }
     } else if (loc.kind === "intersection") {
       const ka = resolveTarget(loc.a, available, places).key;
       const kb = resolveTarget(loc.b, available, places).key;
       const nodes = intersectionNodes(graph, ka, kb);
-      let best: { at: number; coord: LonLat; d: number } | null = null;
+      let best: { at: number; coord: LonLat } | null = null;
       for (const n of nodes) {
         const hit = nearestIndex(track, n.coord, minAt);
-        if (hit.d < 45 && (!best || hit.index < best.at)) best = { at: hit.index, coord: n.coord, d: hit.d };
-      }
-      if (!best) {
-        for (const n of nodes) {
-          const hit = nearestIndex(track, n.coord, 0);
-          if (!best || hit.d < best.d) best = { at: Math.max(hit.index, minAt), coord: n.coord, d: hit.d };
-        }
+        if (hit.d <= 60 && (!best || hit.index < best.at)) best = { at: hit.index, coord: track[hit.index] };
       }
       if (best) {
         coord = best.coord;
         at = best.at;
+      } else {
+        warnings.push({ level: "warn", stopIndex: index, maneuverIndex: -1, message: `The route doesn't reach the mapped intersection for stop “${stop.description}”. Its marker is approximate; check it on the map.` });
       }
+    } else if (index > 0) {
+      warnings.push({ level: "warn", stopIndex: index, maneuverIndex: -1, message: `Stop “${stop.description}” gives only a street name, so its exact position along the street is unknown. Check this stop marker.` });
     }
 
     out.push({
@@ -1121,7 +1133,7 @@ function placeStops(
     });
     minAt = Math.max(minAt, at);
   });
-  return out;
+  return { stops: out, warnings };
 }
 
 function scoreRoute(r: RouteSuccess): number {
