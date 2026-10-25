@@ -81,7 +81,7 @@ function ManeuverArrow({ kind }: { kind: ManeuverKind }) {
       : kind === "turnaround"
         ? RotateCcw
         : ArrowUp;
-  return <Icon aria-hidden="true" className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[#315d8c]" strokeWidth={2.5} />;
+  return <Icon aria-hidden="true" className="h-3.5 w-3.5 shrink-0 text-[#315d8c]" strokeWidth={2.5} />;
 }
 
 function emptySheet(): Sheet {
@@ -1459,10 +1459,10 @@ export function TripApp() {
                         const nearbyTargetRoad = targetRoad && targetRoad.distance <= 0.015 ? targetRoad : null;
                         return (
                           <li key={mi} className="grid grid-cols-[minmax(0,1fr)_1.75rem_1.9rem] items-center gap-1 rounded-lg border border-[#e1e7ef] bg-white p-1.5 shadow-[0_1px_2px_rgba(24,39,62,0.04)] sm:grid-cols-[minmax(0,0.85fr)_minmax(0,1fr)_1.75rem_1.9rem]">
-                              <div className="relative min-w-0">
+                              <div className="flex h-8 min-w-0 items-center rounded-md border border-[#cbd5e1] bg-[#f8fafc] pl-2 focus-within:ring-2 focus-within:ring-[#9bb4ff]">
                                 <ManeuverArrow kind={m.kind} />
                                 <select
-                                  className="h-8 w-full min-w-0 rounded-md border border-[#cbd5e1] bg-[#f8fafc] py-1 pl-7 pr-1 text-[13px] font-medium leading-tight text-[#17243a]"
+                                  className="h-full min-w-0 flex-1 border-0 bg-transparent px-1 text-[13px] font-medium leading-tight text-[#17243a] outline-none"
                                   value={m.kind}
                                   aria-label="Direction"
                                   onChange={(e) => updateManeuver(si, mi, { kind: e.target.value as ManeuverKind })}
