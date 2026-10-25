@@ -10,7 +10,7 @@ import { driveBetween } from "@/lib/engine/drive";
 import { buildGpx } from "@/lib/engine/gpx";
 import { classifyLocation, parseSheet } from "@/lib/engine/parseSheet";
 import { routeSheet } from "@/lib/engine/route";
-import type { Maneuver, ManeuverKind, RouteOverrides, RouteSuccess, Sheet, TurnaroundPin, Warning } from "@/lib/engine/types";
+import type { LonLat, Maneuver, ManeuverKind, RawLine, RouteOverrides, RouteSuccess, Sheet, TurnaroundPin, Warning } from "@/lib/engine/types";
 import { loadAround, loadCorridor, loadMap, lookupName, mergeMaps, type MapData } from "@/lib/mapfetch";
 import { canonicalKey, looksLikePlace, schoolSig } from "@/lib/engine/names";
 import { matchPlace } from "@/lib/engine/route";
@@ -31,6 +31,21 @@ const RouteMap = dynamic(() => import("@/components/RouteMap"), {
 type View = "day" | "edit" | "preview" | "review";
 
 type TripState = { state: "building" | "added" | "failed"; message?: string };
+
+function nearestStreetLine(lines: RawLine[], street: string, lat: number, lon: number): { line: RawLine; point: LonLat; distance: number } | null {
+  const key = canonicalKey(street);
+  const candidates = lines.filter((line) => canonicalKey(line.name) === key || line.keys.some((lineKey) => canonicalKey(lineKey) === key));
+  let nearest: { line: RawLine; point: LonLat; distance: number } | null = null;
+  for (const line of candidates) {
+    for (const point of line.coords) {
+      const dx = (point[0] - lon) * Math.cos((lat * Math.PI) / 180);
+      const dy = point[1] - lat;
+      const distance = Math.hypot(dx, dy);
+      if (!nearest || distance < nearest.distance) nearest = { line, point, distance };
+    }
+  }
+  return nearest;
+}
 
 const KINDS: ManeuverKind[] = ["proceed", "left", "right", "turnaround"];
 const KIND_LABEL: Record<ManeuverKind, string> = {
@@ -1259,6 +1274,12 @@ export function TripApp() {
                       {stop.maneuvers.map((m, mi) => {
                         const st = streetState(m.street);
                         const mid = `${si}-${mi}`;
+                        const warned = editWarnings.some((w) => w.stopIndex === si && w.maneuverIndex === mi);
+                        const savedStop = editingRun?.stops[si];
+                        const targetRoad = warned && savedStop && mapData && loadedArea === area
+                          ? nearestStreetLine(mapData.lines, st.label ?? m.street, savedStop.lat, savedStop.lon)
+                          : null;
+                        const nearbyTargetRoad = targetRoad && targetRoad.distance <= 0.015 ? targetRoad : null;
                         return (
                           <li key={mi} className="rounded-lg bg-[#f6f3ea] p-2">
                             <div className="flex items-center gap-2">
@@ -1312,13 +1333,20 @@ export function TripApp() {
                                     </Button>
                                     {directionMapStop === si && (
                                       <div className="mt-2 rounded-lg bg-white p-2" data-direction-map>
-                                        <p className="mb-2 text-xs text-[#3d4b63]">Red ring marks this stop; the dark line is the saved route. Zoom and pan to inspect the turn.</p>
+                                        <div className="mb-2 space-y-1 text-xs text-[#3d4b63]">
+                                          <p><span className="font-semibold text-[#be123c]">Pink dashed line:</span> {nearbyTargetRoad?.line.name || m.street}</p>
+                                          <p><span className="font-semibold text-[#0f2744]">Dark line:</span> saved route · <span className="font-semibold text-[#b91c1c]">Red ring:</span> this stop</p>
+                                          {!mapData || loadedArea !== area
+                                            ? <p>Loading street data…</p>
+                                            : !nearbyTargetRoad && <p className="text-[#7f1d1d]">The named road isn’t in the local map data near this stop, so it can’t be highlighted. Zoom out to inspect nearby roads.</p>}
+                                        </div>
                                         <RouteMap
                                           coords={editingRun.coords}
                                           stops={editingRun.stops.map((savedStop, stopIndex) => ({ lat: savedStop.lat, lon: savedStop.lon, label: `Stop ${stopIndex + 1}: ${savedStop.description}` }))}
                                           turnarounds={[]}
                                           warningStops={editingRun.stops[si] ? [{ lat: editingRun.stops[si].lat, lon: editingRun.stops[si].lon, label: `Check stop ${si + 1}` }] : []}
-                                          focusPoint={editingRun.stops[si] ? { lat: editingRun.stops[si].lat, lon: editingRun.stops[si].lon, key: si + 1 } : undefined}
+                                          highlightedLines={nearbyTargetRoad ? [nearbyTargetRoad.line.coords] : []}
+                                          focusArea={savedStop && nearbyTargetRoad ? [[savedStop.lon, savedStop.lat], nearbyTargetRoad.point] : undefined}
                                         />
                                       </div>
                                     )}
