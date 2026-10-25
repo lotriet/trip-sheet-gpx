@@ -139,6 +139,8 @@ export function TripApp() {
   const [runs, setRuns] = useState<SavedRun[]>([]);
   const [drafts, setDrafts] = useState<EditorDraft[]>([]);
   const [draftsReady, setDraftsReady] = useState(false);
+  const [draftStorageError, setDraftStorageError] = useState("");
+  const [draftStorageAttempt, setDraftStorageAttempt] = useState(0);
   const [draftId, setDraftId] = useState("");
   const [draftActive, setDraftActive] = useState(false);
   const [ready, setReady] = useState(false);
@@ -182,6 +184,9 @@ export function TripApp() {
     kind: ManeuverKind;
     street: string;
   } | null>(null);
+  const [editorWarningCursor, setEditorWarningCursor] = useState(0);
+  const pendingEditorWarning = useRef<{ stopIndex: number; maneuverIndex: number } | null>(null);
+  const draftReadFailed = useRef(false);
   const [mapFocus, setMapFocus] = useState<{ lat: number; lon: number; key: number }>();
   const [mapFixContext, setMapFixContext] = useState<{ stopIndex: number; message: string; street?: string } | null>(null);
   const mapFocusKey = useRef(0);
@@ -207,6 +212,10 @@ export function TripApp() {
     JSON.stringify(currentDraft.overrides) === JSON.stringify(overrides) &&
     JSON.stringify(currentDraft.warnings) === JSON.stringify(editWarnings);
   const editingRun = editingId ? runs.find((run) => run.id === editingId) : undefined;
+  const unreviewedRuns = useMemo(
+    () => runs.filter((run) => !run.warningsAcknowledged && run.warnings.some((warning) => warning.level === "warn")),
+    [runs],
+  );
   // Fresh lookups of names the loaded map doesn't have, keyed by the typed text.
   const [lookups, setLookups] = useState<Record<string, { state: "looking" | "found" | "none"; name?: string }>>({});
   const [recheckTick, setRecheckTick] = useState(0);
@@ -413,27 +422,38 @@ export function TripApp() {
   }, [loadAttempt]);
 
   useEffect(() => {
+    let active = true;
     const timer = window.setTimeout(() => {
       try {
         const saved = localStorage.getItem(EDITOR_DRAFTS_KEY);
         const parsed: unknown = saved ? JSON.parse(saved) : [];
-        if (Array.isArray(parsed)) setDrafts(parsed as EditorDraft[]);
+        if (!Array.isArray(parsed)) throw new Error("Saved drafts have an unexpected format.");
+        draftReadFailed.current = false;
+        setDrafts(parsed as EditorDraft[]);
+        setDraftStorageError("");
       } catch {
-        // A corrupt draft cache should not prevent opening saved runs.
+        draftReadFailed.current = true;
+        setDraftStorageError("Could not load unfinished drafts from this phone. Retry storage before starting another draft.");
       } finally {
-        setDraftsReady(true);
+        if (active) setDraftsReady(true);
       }
     }, 0);
-    return () => window.clearTimeout(timer);
-  }, []);
+    return () => {
+      active = false;
+      window.clearTimeout(timer);
+    };
+  }, [draftStorageAttempt]);
 
   useEffect(() => {
-    if (!draftsReady) return;
+    if (!draftsReady || draftReadFailed.current) return;
+    let message = "";
     try {
       localStorage.setItem(EDITOR_DRAFTS_KEY, JSON.stringify(drafts));
     } catch {
-      // Keep drafts in memory when browser storage is full or disabled.
+      message = "Unfinished work could not be saved on this phone. It may be lost if you close or reload this page.";
     }
+    const timer = window.setTimeout(() => setDraftStorageError(message), 0);
+    return () => window.clearTimeout(timer);
   }, [drafts, draftsReady]);
 
   useEffect(() => {
@@ -447,6 +467,18 @@ export function TripApp() {
     }, 500);
     return () => clearTimeout(timer);
   }, [draftsReady, draftActive, draftId, editingId, text, sheet, area, overrides, editWarnings]);
+
+  useEffect(() => {
+    if (view !== "edit" || !pendingEditorWarning.current || !editWarnings.length) return;
+    const first = pendingEditorWarning.current;
+    pendingEditorWarning.current = null;
+    const frame = requestAnimationFrame(() => {
+      (document.querySelector<HTMLElement>(`[data-direction-row="${first.stopIndex}-${first.maneuverIndex}"]`) ??
+        document.querySelector<HTMLElement>(`[data-stop="${first.stopIndex}"]`))
+        ?.scrollIntoView({ behavior: "smooth", block: "center" });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [view, editWarnings]);
 
   useEffect(() => {
     if (!ready) return;
@@ -522,7 +554,7 @@ export function TripApp() {
     const parsed = parseSheet(run.sheetText);
     setSheet(parsed.stops.length ? parsed : emptySheet());
     setRoute(null);
-    setEditWarnings((run.warnings ?? []).flatMap((w) => {
+    const mappedWarnings = (run.warnings ?? []).flatMap((w) => {
       if (w.level !== "warn") return [];
       if (typeof w.stopIndex === "number" && typeof w.maneuverIndex === "number") {
         return [{ level: "warn" as const, stopIndex: w.stopIndex, maneuverIndex: w.maneuverIndex, message: w.message }];
@@ -532,11 +564,40 @@ export function TripApp() {
       const match = parsed.stops.flatMap((stop, stopIndex) => stop.maneuvers.map((maneuver, maneuverIndex) => ({ stopIndex, maneuverIndex, street: maneuver.street })))
         .find((item) => item.street.trim() && needle.includes(item.street.trim().toLocaleLowerCase()));
       return match ? [{ level: "warn" as const, stopIndex: match.stopIndex, maneuverIndex: match.maneuverIndex, message: w.message }] : [];
-    }));
+    });
+    setEditWarnings(mappedWarnings);
+    setEditorWarningCursor(0);
+    pendingEditorWarning.current = mappedWarnings.length ? mappedWarnings[0] : null;
     setMapData(null);
     setOverrides({ vias: run.vias ?? [] });
     setError("");
     setView("edit");
+  }
+
+  function retryDraftPersistence() {
+    if (draftReadFailed.current) {
+      setDraftsReady(false);
+      setDraftStorageAttempt((attempt) => attempt + 1);
+      return;
+    }
+    if (!hasDraftContent) {
+      setDraftsReady(false);
+      setDraftStorageAttempt((attempt) => attempt + 1);
+      return;
+    }
+    const draft: EditorDraft = {
+      id: draftId || newId(), editingId, text, sheet, area, overrides,
+      warnings: editWarnings, updatedAt: Date.now(),
+    };
+    const next = [draft, ...drafts.filter((item) => item.id !== draft.id)];
+    try {
+      localStorage.setItem(EDITOR_DRAFTS_KEY, JSON.stringify(next));
+      setDrafts(next);
+      setDraftId(draft.id);
+      setDraftStorageError("");
+    } catch {
+      setDraftStorageError("Unfinished work could not be saved on this phone. It may be lost if you close or reload this page.");
+    }
   }
 
   function saveDraftAndBack() {
@@ -872,6 +933,17 @@ export function TripApp() {
     requestAnimationFrame(() => document.querySelector(`[data-stop-row="${stopIndex}"]`)?.scrollIntoView({ behavior: "smooth", block: "center" }));
   }
 
+  function focusEditorWarning(index: number) {
+    const warning = editWarnings[index];
+    if (!warning) return;
+    setEditorWarningCursor(index);
+    requestAnimationFrame(() => {
+      (document.querySelector<HTMLElement>(`[data-direction-row="${warning.stopIndex}-${warning.maneuverIndex}"]`) ??
+        document.querySelector<HTMLElement>(`[data-stop="${warning.stopIndex}"]`))
+        ?.scrollIntoView({ behavior: "smooth", block: "center" });
+    });
+  }
+
   function queueWarningAdvance(stopIndex: number, maneuverIndex?: number, message?: string) {
     const warnings = route?.warnings.filter((warning) => warning.level === "warn") ?? [];
     const active = warnings.find((warning) => warning.stopIndex === stopIndex &&
@@ -1109,6 +1181,17 @@ export function TripApp() {
     setRuns((prev) => prev.filter((item) => item.id !== run.id));
   }
 
+  function allowBatchExport() {
+    const first = unreviewedRuns[0];
+    if (!first) return true;
+    const label = [first.route, first.run].filter(Boolean).join(" ") || "the highlighted run";
+    setError(`Review and acknowledge the route warning on ${label} before exporting today’s GPX files.`);
+    requestAnimationFrame(() => {
+      document.querySelector<HTMLElement>(`[data-warning-run="${first.id}"]`)?.scrollIntoView({ behavior: "smooth", block: "center" });
+    });
+    return false;
+  }
+
   async function deliverGpx(files: TextFile[], title: string, source: GpxNotice["source"]) {
     setGpxNotice({ files, title, source, state: "sharing" });
     try {
@@ -1132,16 +1215,23 @@ export function TripApp() {
   }
 
   async function shareAll() {
-    if (!runs.length) return;
-    if (!confirmDayOrder()) return;
+    if (!runs.length || exportLock.current || !allowBatchExport()) return;
+    exportLock.current = true;
+    setExportingDay(true);
     setError("");
-    const used = new Set<string>();
-    const files = runs.map((run, i) => ({ name: gpxFileName(run.run, i, used), text: run.gpx }));
-    await deliverGpx(files, `${files.length} runs`, "all");
+    try {
+      if (!confirmDayOrder()) return;
+      const used = new Set<string>();
+      const files = runs.map((run, i) => ({ name: gpxFileName(run.run, i, used), text: run.gpx }));
+      await deliverGpx(files, `${files.length} runs`, "all");
+    } finally {
+      exportLock.current = false;
+      setExportingDay(false);
+    }
   }
 
   async function exportDay() {
-    if (!runs.length || exportLock.current) return;
+    if (!runs.length || exportLock.current || !allowBatchExport()) return;
     exportLock.current = true;
     setExportingDay(true);
     const exportRuns = [...runs];
@@ -1266,7 +1356,13 @@ export function TripApp() {
         </details>
       </header>
 
-      {!stored && <p className="bg-[#fff4d6] px-4 py-2 text-sm font-medium text-[#714b08]" role="alert">This phone couldn’t save the latest changes. Check storage before leaving this page.</p>}
+          {!stored && <p className="bg-[#fff4d6] px-4 py-2 text-sm font-medium text-[#714b08]" role="alert">This phone couldn’t save the latest changes. Check storage before leaving this page.</p>}
+          {draftStorageError && (
+            <div className="flex flex-wrap items-center justify-between gap-2 bg-[#fff4d6] px-4 py-2 text-sm text-[#714b08]" role="alert">
+              <p>{draftStorageError}</p>
+              <Button type="button" variant="outline" className="h-8 bg-white px-2.5 text-xs" onClick={retryDraftPersistence}>{draftReadFailed.current ? "Retry loading drafts" : "Retry draft save"}</Button>
+            </div>
+          )}
 
       {status && <p className="bg-[#f5c451] px-4 py-2 text-sm font-medium text-[#142033]">{status}</p>}
       {error && (
@@ -1306,6 +1402,15 @@ export function TripApp() {
               </div>
             </div>
           )}
+          {unreviewedRuns.length > 0 && (
+            <div className="rounded-xl border border-[#e5bd77] bg-[#fff8e9] p-3 text-sm text-[#59451f]" role="alert">
+              <p className="font-semibold">Review {unreviewedRuns.length} run{unreviewedRuns.length === 1 ? "" : "s"} before exporting.</p>
+              <p className="mt-1 text-xs leading-relaxed">Every route warning must be acknowledged on its run. Batch GPX export is paused until then.</p>
+              <Button type="button" variant="outline" className="mt-2 h-8 bg-white px-2.5 text-xs font-semibold" onClick={() => openEdit(unreviewedRuns[0])} disabled={exportingDay}>
+                Review {unreviewedRuns[0].route || "run"} {unreviewedRuns[0].run}
+              </Button>
+            </div>
+          )}
           {draftsReady && drafts.length > 0 && (
             <section aria-label="Unfinished drafts" className="space-y-2">
               {drafts.map((draft) => {
@@ -1326,7 +1431,7 @@ export function TripApp() {
           {runs.map((run, i) => {
             const warnings = run.warnings.filter((w) => w.level === "warn");
                 return (
-            <article key={run.id} data-warning-run={warnings.length && !run.warningsAcknowledged ? "true" : undefined} className="rounded-2xl border border-[#dce3ec] bg-white p-3.5 shadow-[0_4px_14px_rgba(24,39,62,0.07)] transition-shadow hover:shadow-[0_7px_20px_rgba(24,39,62,0.1)]">
+            <article key={run.id} data-warning-run={warnings.length && !run.warningsAcknowledged ? run.id : undefined} className="rounded-2xl border border-[#dce3ec] bg-white p-3.5 shadow-[0_4px_14px_rgba(24,39,62,0.07)] transition-shadow hover:shadow-[0_7px_20px_rgba(24,39,62,0.1)]">
               <div className="flex items-start gap-3">
                 <div className="flex shrink-0 flex-col items-center gap-1">
                   <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-[#173b64] text-sm font-bold text-white">{i + 1}</span>
@@ -1405,11 +1510,11 @@ export function TripApp() {
                 Add a run
               </Button>
               <div className="grid grid-cols-2 gap-2">
-                <Button type="button" variant="outline" className="h-10 rounded-xl border-[#dce3ec] bg-[#f8fafc] text-xs font-semibold" disabled={!runs.length || exportingDay} onClick={() => void exportDay()}>
-                  {exportingDay ? "Preparing day GPX…" : "One GPX for the day"}
+                <Button type="button" variant="outline" className="h-10 rounded-xl border-[#dce3ec] bg-[#f8fafc] text-xs font-semibold" disabled={!runs.length || exportingDay || unreviewedRuns.length > 0} title={unreviewedRuns.length ? "Review and acknowledge each run’s warnings first" : undefined} onClick={() => void exportDay()}>
+                  {exportingDay ? "Preparing GPX…" : "One GPX for the day"}
                 </Button>
-                <Button type="button" variant="outline" className="h-10 rounded-xl border-[#dce3ec] bg-[#f8fafc] text-xs font-semibold" disabled={!runs.length || exportingDay} onClick={() => void shareAll()}>
-                  {canShare ? "Share all" : "Download all"}
+                <Button type="button" variant="outline" className="h-10 rounded-xl border-[#dce3ec] bg-[#f8fafc] text-xs font-semibold" disabled={!runs.length || exportingDay || unreviewedRuns.length > 0} title={unreviewedRuns.length ? "Review and acknowledge each run’s warnings first" : undefined} onClick={() => void shareAll()}>
+                  {exportingDay ? "Preparing GPX…" : canShare ? "Share all" : "Download all"}
                 </Button>
               </div>
               <p className="text-center text-xs leading-relaxed text-[#3d4b63]">One GPX combines runs in this order. Share all sends a separate file for each run.</p>
@@ -1532,8 +1637,8 @@ export function TripApp() {
                 <div className="flex shrink-0 flex-wrap justify-end gap-1.5">
                   {sheet.stops.length > 0 && <span className="rounded-full bg-[#173b64] px-2.5 py-1 text-xs font-bold text-white">{sheet.stops.length} stops</span>}
                   {draftActive && hasDraftContent && (
-                    <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${draftIsSaved ? "bg-[#e7f3eb] text-[#216338]" : "bg-[#fff4d6] text-[#80540b]"}`}>
-                      {draftIsSaved ? "Saved on this phone" : "Saving draft…"}
+                    <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${draftStorageError ? "bg-[#fee2e2] text-[#991b1b]" : draftIsSaved ? "bg-[#e7f3eb] text-[#216338]" : "bg-[#fff4d6] text-[#80540b]"}`}>
+                      {draftStorageError ? "Draft not saved" : draftIsSaved ? "Saved on this phone" : "Saving draft…"}
                     </span>
                   )}
                 </div>
@@ -1560,9 +1665,24 @@ export function TripApp() {
             <Input className="mt-1 h-9 bg-white text-sm" value={area} onChange={(e) => setArea(e.target.value)} />
           </label>
           {editWarnings.length > 0 && (
-            <p className="rounded-lg border border-[#b93816] bg-[#fff7ed] px-3 py-2 text-sm text-[#7f1d1d]">
-              A green street check confirms the name exists on the map. The route warning below means the turn connection needs review.
-            </p>
+            <div className="rounded-lg border border-[#b93816] bg-[#fff7ed] px-3 py-2 text-sm text-[#7f1d1d]">
+              <p>A green street check confirms the name exists on the map. The route warning below means the turn connection needs review.</p>
+              {editWarnings[editorWarningCursor] && (
+                <div className="mt-2 flex flex-wrap items-center justify-between gap-2 rounded-md bg-white/70 px-2 py-1.5">
+                  <p className="text-xs font-semibold">
+                    Warning {editorWarningCursor + 1} of {editWarnings.length} · Stop {editWarnings[editorWarningCursor].stopIndex + 1}
+                    {sheet.stops[editWarnings[editorWarningCursor].stopIndex]?.maneuvers[editWarnings[editorWarningCursor].maneuverIndex] && (() => {
+                      const maneuver = sheet.stops[editWarnings[editorWarningCursor].stopIndex].maneuvers[editWarnings[editorWarningCursor].maneuverIndex];
+                      return ` · ${KIND_LABEL[maneuver.kind]} ${maneuver.street}`;
+                    })()}
+                  </p>
+                  <div className="flex gap-1.5">
+                    <Button type="button" variant="outline" className="h-8 px-2 text-xs" disabled={editWarnings.length < 2} onClick={() => focusEditorWarning((editorWarningCursor + editWarnings.length - 1) % editWarnings.length)}>Previous</Button>
+                    <Button type="button" variant="outline" className="h-8 px-2 text-xs" disabled={editWarnings.length < 2} onClick={() => focusEditorWarning((editorWarningCursor + 1) % editWarnings.length)}>Next warning</Button>
+                  </div>
+                </div>
+              )}
+            </div>
           )}
           {!reviewTrip && pages.length > 0 && trips.length > 1 && (
             <Button type="button" variant="outline" className="h-11" onClick={() => setView("review")}>
@@ -1695,7 +1815,7 @@ export function TripApp() {
                           : null;
                         const nearbyTargetRoad = targetRoad && targetRoad.distance <= 0.015 ? targetRoad : null;
                         return (
-                          <li key={mi} className="grid grid-cols-[9rem_1.75rem_1.9rem] items-center gap-1 rounded-lg border border-[#e1e7ef] bg-white p-1.5 shadow-[0_1px_2px_rgba(24,39,62,0.04)] sm:grid-cols-[9rem_minmax(0,1fr)_1.75rem_1.9rem]">
+                          <li key={mi} data-direction-row={mid} className="grid grid-cols-[9rem_1.75rem_1.9rem] items-center gap-1 rounded-lg border border-[#e1e7ef] bg-white p-1.5 shadow-[0_1px_2px_rgba(24,39,62,0.04)] sm:grid-cols-[9rem_minmax(0,1fr)_1.75rem_1.9rem]">
                               <div className="flex h-8 min-w-0 items-center rounded-md border border-[#cbd5e1] bg-[#f8fafc] pl-2 focus-within:ring-2 focus-within:ring-[#9bb4ff]">
                                 <ManeuverArrow kind={m.kind} />
                                 <select
