@@ -1098,7 +1098,12 @@ export function TripApp() {
               <PageThumbs pages={reviewTrip.pages} onOpen={setBigThumb} />
             </div>
           )}
-          <Tucked away={!!reviewTrip}>
+          <Tucked
+            away={!!reviewTrip || hasStops}
+            summary={hasStops
+              ? `Original scan & text · ${sheet.stops.length} stops recognized`
+              : "Original scan, sheet text & area"}
+          >
           <label className="text-sm font-medium">
             Area
             <Input className="mt-1 h-12 bg-white text-base" value={area} onChange={(e) => setArea(e.target.value)} />
@@ -1580,11 +1585,11 @@ function prettyText(sheet: Sheet): string {
 }
 
 /** In a trip opened from the review list the stops come first; the raw text folds away. */
-function Tucked({ away, children }: { away: boolean; children: React.ReactNode }) {
+function Tucked({ away, summary, children }: { away: boolean; summary: string; children: React.ReactNode }) {
   if (!away) return <>{children}</>;
   return (
     <details className="rounded-xl bg-white p-3 ring-1 ring-[#d9d2c3]">
-      <summary className="cursor-pointer text-sm font-medium">Sheet text and area</summary>
+      <summary className="cursor-pointer text-sm font-medium">{summary}</summary>
       <div className="mt-2 flex flex-col gap-3">{children}</div>
     </details>
   );
