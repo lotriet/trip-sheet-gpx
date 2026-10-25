@@ -1157,7 +1157,7 @@ export function TripApp() {
             </article>
             );
           })}
-          <div className="fixed inset-x-0 bottom-0 z-30 border-t border-[#dce3ec] bg-white/95 p-3 shadow-[0_-8px_28px_rgba(24,39,62,0.09)] backdrop-blur-md">
+          <div className="fixed inset-x-0 bottom-0 z-[1200] border-t border-[#dce3ec] bg-white p-3 shadow-[0_-8px_28px_rgba(24,39,62,0.12)]">
             <div className="mx-auto flex max-w-2xl flex-col gap-2">
               <Button type="button" className="h-11 rounded-xl bg-[#173b64] text-sm font-bold text-white shadow-sm" onClick={openNew} disabled={exportingDay}>
                 Add a run
@@ -1256,7 +1256,7 @@ export function TripApp() {
               ))}
             </div>
           )}
-          <div className="fixed inset-x-0 bottom-0 z-30 border-t border-[#dce3ec] bg-white/95 p-3 shadow-[0_-8px_28px_rgba(24,39,62,0.09)] backdrop-blur-md">
+          <div className="fixed inset-x-0 bottom-0 z-[1200] border-t border-[#dce3ec] bg-white p-3 shadow-[0_-8px_28px_rgba(24,39,62,0.12)]">
             <div className="mx-auto flex max-w-lg flex-col gap-2">
               {status && <p className="text-sm font-medium">{status}</p>}
               <div className="flex gap-2">
@@ -1576,7 +1576,7 @@ export function TripApp() {
               </div>
             </div>
           )}
-          <div className="fixed inset-x-0 bottom-0 z-30 border-t border-[#dce3ec] bg-white/95 p-3 shadow-[0_-8px_28px_rgba(24,39,62,0.09)] backdrop-blur-md">
+          <div className="fixed inset-x-0 bottom-0 z-[1200] border-t border-[#dce3ec] bg-white p-3 shadow-[0_-8px_28px_rgba(24,39,62,0.12)]">
             <div className="mx-auto flex max-w-2xl flex-col gap-2">
               {status && <p className="text-sm font-medium">{status}</p>}
               {error && <p className="text-sm text-[#7f1d1d]">{error}</p>}
@@ -1770,7 +1770,7 @@ export function TripApp() {
               ))}
             </ul>
           )}
-          <div className="fixed inset-x-0 bottom-0 z-30 border-t border-[#dce3ec] bg-white/95 p-3 shadow-[0_-8px_28px_rgba(24,39,62,0.09)] backdrop-blur-md">
+          <div className="fixed inset-x-0 bottom-0 z-[1200] border-t border-[#dce3ec] bg-white p-3 shadow-[0_-8px_28px_rgba(24,39,62,0.12)]">
             <div className="mx-auto flex max-w-2xl flex-col gap-2">
               {tapMode !== null ? (
                 <Button
