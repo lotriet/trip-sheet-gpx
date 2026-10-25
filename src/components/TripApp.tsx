@@ -1271,7 +1271,7 @@ export function TripApp() {
       )}
 
       {view === "edit" && (
-        <section className="flex flex-col gap-2 px-4 py-3 pb-48">
+        <section className="flex flex-col gap-1.5 px-3 py-2 pb-48">
           {reviewTrip && (
             <div className="rounded-xl bg-white p-3 ring-1 ring-[#d9d2c3]" data-trip-open={reviewTrip.run || reviewTrip.key}>
               <p className="text-lg font-semibold">
@@ -1358,10 +1358,10 @@ export function TripApp() {
             </div>
           )}
           {sheet.stops.length > 0 && (
-            <div className="space-y-2">
+              <div className="space-y-1.5">
               <div className="grid grid-cols-2 gap-2">
-                <Input className="h-10 bg-white text-base" value={sheet.route} placeholder="Route" aria-label="Route" onChange={(e) => setSheet({ ...sheet, route: e.target.value })} />
-                <Input className="h-10 bg-white text-base" value={sheet.run} placeholder="Run" aria-label="Run" onChange={(e) => setSheet({ ...sheet, run: e.target.value })} />
+                <Input className="h-9 bg-white text-base" value={sheet.route} placeholder="Route" aria-label="Route" onChange={(e) => setSheet({ ...sheet, route: e.target.value })} />
+                <Input className="h-9 bg-white text-base" value={sheet.run} placeholder="Run" aria-label="Run" onChange={(e) => setSheet({ ...sheet, run: e.target.value })} />
               </div>
               <WrapField
                 value={sheet.description}
@@ -1373,12 +1373,12 @@ export function TripApp() {
                 const stopCheck = stopState(stop.description);
                 const sid = `stop-${si}`;
                 return (
-                  <div key={si} className="rounded-xl bg-white p-2.5 ring-1 ring-[#d9d2c3]" data-stop={si}>
+                  <div key={si} className="rounded-xl bg-white p-2 ring-1 ring-[#d9d2c3]" data-stop={si}>
                     <div className="mb-1 flex items-center justify-between gap-2">
                       <p className="text-sm font-semibold">Stop {si + 1}</p>
                       <button
                         type="button"
-                        className="h-11 touch-manipulation rounded-lg border border-[#d9d2c3] bg-white px-3 text-base text-[#7f1d1d]"
+                        className="h-9 touch-manipulation rounded-lg border border-[#d9d2c3] bg-white px-2.5 text-sm text-[#7f1d1d]"
                         aria-label={`Delete stop ${si + 1}`}
                         onClick={() => deleteStop(si)}
                       >
@@ -1386,11 +1386,11 @@ export function TripApp() {
                       </button>
                     </div>
                     <div className="flex items-end gap-2">
-                      <Input className="h-10 w-32 shrink-0 bg-white text-base" value={stop.time} aria-label="Stop time" onChange={(e) => setSheet({ ...sheet, stops: sheet.stops.map((s, i) => (i === si ? { ...s, time: e.target.value } : s)) })} />
+                      <Input className="h-9 w-32 shrink-0 bg-white text-base" value={stop.time} aria-label="Stop time" onChange={(e) => setSheet({ ...sheet, stops: sheet.stops.map((s, i) => (i === si ? { ...s, time: e.target.value } : s)) })} />
                       <StreetMark state={stopCheck.state} open={suggestFor === sid} onTap={() => void tapMark(sid, stopCheck.missing)} />
                     </div>
                     <WrapField
-                      className="mt-2"
+                      className="mt-1"
                       value={stop.description}
                       label="Stop place"
                       onChange={(description) => setSheet({ ...sheet, stops: sheet.stops.map((s, i) => (i === si ? { ...s, description } : s)) })}
@@ -1411,7 +1411,7 @@ export function TripApp() {
                         }}
                       />
                     )}
-                    <ul className="mt-1.5 space-y-1">
+                    <ul className="mt-1 space-y-1">
                       {stop.maneuvers.map((m, mi) => {
                         const st = streetState(m.street);
                         const mid = `${si}-${mi}`;
@@ -1422,10 +1422,9 @@ export function TripApp() {
                           : null;
                         const nearbyTargetRoad = targetRoad && targetRoad.distance <= 0.015 ? targetRoad : null;
                         return (
-                          <li key={mi} className="rounded-lg bg-[#f6f3ea] p-1">
-                            <div className="flex items-center gap-2">
+                          <li key={mi} className="grid grid-cols-[minmax(0,0.85fr)_minmax(0,1fr)_2rem_2.25rem] items-center gap-1 rounded-lg bg-[#f6f3ea] p-1">
                               <select
-                                className="h-10 min-w-0 flex-1 rounded-lg border border-[#d9d2c3] bg-white px-2 text-base"
+                                className="h-9 min-w-0 rounded-lg border border-[#d9d2c3] bg-white px-1.5 text-sm"
                                 value={m.kind}
                                 aria-label="Direction"
                                 onChange={(e) => updateManeuver(si, mi, { kind: e.target.value as ManeuverKind })}
@@ -1436,26 +1435,26 @@ export function TripApp() {
                                   </option>
                                 ))}
                               </select>
+                              <WrapField
+                                className="min-h-9 px-2 py-1 text-base"
+                                value={m.street}
+                                label="Street"
+                                placeholder="Street name"
+                                onChange={(street) => updateManeuver(si, mi, { street })}
+                                onBlur={() => void recheckSoon()}
+                              />
                               <StreetMark state={st.state} open={suggestFor === mid} onTap={() => void tapMark(mid, st.state === "found" ? [] : [m.street])} />
                               <button
                                 type="button"
-                                className="h-10 touch-manipulation rounded-lg border border-[#d9d2c3] bg-white px-3 text-base"
+                                className="h-9 w-9 touch-manipulation rounded-lg border border-[#d9d2c3] bg-white text-sm"
                                 aria-label="Delete this direction"
                                 onClick={() => setSheet({ ...sheet, stops: sheet.stops.map((s, i) => (i === si ? { ...s, maneuvers: s.maneuvers.filter((_, j) => j !== mi) } : s)) })}
                               >
                                 ✕
                               </button>
-                            </div>
-                            <WrapField
-                              className="mt-2"
-                              value={m.street}
-                              label="Street"
-                              onChange={(street) => updateManeuver(si, mi, { street })}
-                              onBlur={() => void recheckSoon()}
-                            />
-                            {st.label && <p className="mt-1 text-xs text-[#15803d]">On the map: {st.label}</p>}
+                            {st.label && <p className="col-span-4 px-1 text-[0.7rem] leading-tight text-[#15803d]">On the map: {st.label}</p>}
                             {editWarnings.filter((w) => w.stopIndex === si && w.maneuverIndex === mi).map((w, wi) => (
-                              <div key={`route-warning-${wi}`} className="mt-2 rounded-md border border-[#f0c36d] bg-[#ffedd5] p-2 text-sm text-[#7f1d1d]">
+                              <div key={`route-warning-${wi}`} className="col-span-4 rounded-md border border-[#f0c36d] bg-[#ffedd5] p-2 text-sm text-[#7f1d1d]">
                                 <p role="alert">Route warning: {w.message}</p>
                                 {editingRun && editingRun.coords.length > 1 && (
                                   <>
@@ -1526,7 +1525,7 @@ export function TripApp() {
                     <Button
                       type="button"
                       variant="outline"
-                      className="mt-1.5 h-9"
+                              className="mt-1 h-8 px-2 text-xs"
                       onClick={() =>
                         setSheet({
                           ...sheet,
@@ -1838,7 +1837,7 @@ function WrapField({
       autoCorrect="off"
       autoCapitalize="off"
       enterKeyHint={multiline ? "enter" : "done"}
-      className={`block w-full min-h-10 resize-none overflow-hidden rounded-lg border border-[#d9d2c3] bg-white px-3 py-2 text-base leading-snug break-words whitespace-pre-wrap ${multiline ? "min-h-36" : ""} ${className}`}
+      className={`block w-full min-h-9 resize-none overflow-hidden rounded-lg border border-[#d9d2c3] bg-white px-3 py-1.5 text-base leading-snug break-words whitespace-pre-wrap ${multiline ? "min-h-36" : ""} ${className}`}
       onChange={(e) => {
         onChange(multiline ? e.target.value : e.target.value.replace(/\n/g, " "));
         fit(e.currentTarget);
@@ -1941,7 +1940,7 @@ function SuggestPanel({
 function StreetMark({ state, open, onTap }: { state: string; open: boolean; onTap: () => void }) {
   if (state === "found") {
     return (
-      <span className="flex h-11 w-9 items-center justify-center text-lg font-bold text-[#15803d]" aria-label="Street found on the map">
+      <span className="flex h-9 w-8 items-center justify-center text-base font-bold text-[#15803d]" aria-label="Street found on the map">
         ✓
       </span>
     );
@@ -1950,7 +1949,7 @@ function StreetMark({ state, open, onTap }: { state: string; open: boolean; onTa
     return (
       <button
         type="button"
-        className={`h-11 w-9 rounded-lg text-lg font-bold text-white ${open ? "bg-[#7f1d1d]" : "bg-[#dc2626]"}`}
+        className={`h-9 w-8 rounded-lg text-base font-bold text-white ${open ? "bg-[#7f1d1d]" : "bg-[#dc2626]"}`}
         aria-label="Street not found. Show close matches"
         onClick={onTap}
       >
@@ -1960,13 +1959,13 @@ function StreetMark({ state, open, onTap }: { state: string; open: boolean; onTa
   }
   if (state === "looking") {
     return (
-      <span className="flex h-11 w-9 items-center justify-center" aria-label="Looking up the name">
+      <span className="flex h-9 w-8 items-center justify-center" aria-label="Looking up the name">
         <span className="h-5 w-5 animate-spin rounded-full border-2 border-[#d9d2c3] border-t-[#0f2744]" />
       </span>
     );
   }
   if (state === "checking") {
-    return <span className="flex h-11 w-9 items-center justify-center text-[#9ca3af]" aria-label="Checking the street">…</span>;
+    return <span className="flex h-9 w-8 items-center justify-center text-[#9ca3af]" aria-label="Checking the street">…</span>;
   }
   return <span className="w-9" aria-hidden />;
 }
