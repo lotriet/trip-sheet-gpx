@@ -31,6 +31,17 @@ const RouteMap = dynamic(() => import("@/components/RouteMap"), {
 type View = "day" | "edit" | "preview" | "review";
 
 type TripState = { state: "building" | "added" | "failed"; message?: string };
+type EditorDraft = {
+  id: string;
+  editingId: string | null;
+  text: string;
+  sheet: Sheet;
+  area: string;
+  overrides: RouteOverrides;
+  warnings: Warning[];
+  updatedAt: number;
+};
+const EDITOR_DRAFTS_KEY = "trip-sheet-gpx-editor-drafts-v1";
 
 function nearbyStreetLines(lines: RawLine[], street: string, lat: number, lon: number): { lines: RawLine[]; point: LonLat; distance: number } | null {
   const key = canonicalKey(street);
@@ -116,6 +127,10 @@ function newId() {
 export function TripApp() {
   const [view, setView] = useState<View>("day");
   const [runs, setRuns] = useState<SavedRun[]>([]);
+  const [drafts, setDrafts] = useState<EditorDraft[]>([]);
+  const [draftsReady, setDraftsReady] = useState(false);
+  const [draftId, setDraftId] = useState("");
+  const [draftActive, setDraftActive] = useState(false);
   const [ready, setReady] = useState(false);
   const [loadError, setLoadError] = useState(false);
   const [loadAttempt, setLoadAttempt] = useState(0);
@@ -351,6 +366,42 @@ export function TripApp() {
   }, [loadAttempt]);
 
   useEffect(() => {
+    const timer = window.setTimeout(() => {
+      try {
+        const saved = localStorage.getItem(EDITOR_DRAFTS_KEY);
+        const parsed: unknown = saved ? JSON.parse(saved) : [];
+        if (Array.isArray(parsed)) setDrafts(parsed as EditorDraft[]);
+      } catch {
+        // A corrupt draft cache should not prevent opening saved runs.
+      } finally {
+        setDraftsReady(true);
+      }
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, []);
+
+  useEffect(() => {
+    if (!draftsReady) return;
+    try {
+      localStorage.setItem(EDITOR_DRAFTS_KEY, JSON.stringify(drafts));
+    } catch {
+      // Keep drafts in memory when browser storage is full or disabled.
+    }
+  }, [drafts, draftsReady]);
+
+  useEffect(() => {
+    if (!draftsReady || !draftActive || (!sheet.stops.length && !text.trim())) return;
+    const timer = setTimeout(() => {
+      const draft: EditorDraft = {
+        id: draftId || newId(), editingId, text, sheet, area, overrides,
+        warnings: editWarnings, updatedAt: Date.now(),
+      };
+      setDrafts((prev) => [draft, ...prev.filter((item) => item.id !== draft.id)]);
+    }, 500);
+    return () => clearTimeout(timer);
+  }, [draftsReady, draftActive, draftId, editingId, text, sheet, area, overrides, editWarnings]);
+
+  useEffect(() => {
     if (!ready) return;
     const revision = ++saveRevision.current;
     saveDay(runs).then((saved) => {
@@ -360,6 +411,8 @@ export function TripApp() {
 
   function openNew() {
     setEditingId(null);
+    setDraftId(newId());
+    setDraftActive(true);
     setDirectionMapStop(null);
     setText("");
     setSheet(emptySheet());
@@ -376,6 +429,8 @@ export function TripApp() {
 
   function openEdit(run: SavedRun) {
     setEditingId(run.id);
+    setDraftId(`run-${run.id}`);
+    setDraftActive(true);
     setDirectionMapStop(null);
     setText(run.sheetText);
     setArea(run.area || area);
@@ -397,6 +452,49 @@ export function TripApp() {
     setOverrides({ vias: run.vias ?? [] });
     setError("");
     setView("edit");
+  }
+
+  function saveDraftAndBack() {
+    if (reviewTrip) {
+      backToTrips();
+      return;
+    }
+    if (draftActive && (sheet.stops.length > 0 || text.trim())) {
+      const draft: EditorDraft = {
+        id: draftId || newId(), editingId, text, sheet, area, overrides,
+        warnings: editWarnings, updatedAt: Date.now(),
+      };
+      setDrafts((prev) => [draft, ...prev.filter((item) => item.id !== draft.id)]);
+      setDraftId(draft.id);
+      setDraftActive(false);
+    }
+    setView("day");
+    window.scrollTo(0, 0);
+  }
+
+  function resumeDraft(draft: EditorDraft) {
+    setDrafts((prev) => prev.filter((item) => item.id !== draft.id));
+    setDraftId(draft.id);
+    setDraftActive(true);
+    setEditingId(draft.editingId);
+    setText(draft.text);
+    setSheet(draft.sheet);
+    setArea(draft.area);
+    setOverrides(draft.overrides);
+    setEditWarnings(draft.warnings);
+    setRoute(null);
+    setMapData(null);
+    setWarningFix(null);
+    setDirectionMapStop(null);
+    setError("");
+    setStatus("");
+    setView("edit");
+    window.scrollTo(0, 0);
+  }
+
+  function discardDraft(draft: EditorDraft) {
+    if (!window.confirm("Discard this unfinished trip-sheet draft? This cannot be undone.")) return;
+    setDrafts((prev) => prev.filter((item) => item.id !== draft.id));
   }
 
   /** Text from photos or a paste: one run goes to the editor, several to the review list. */
@@ -559,6 +657,7 @@ export function TripApp() {
   function openTrip(trip: Trip) {
     const edit = tripEdits[trip.key];
     setEditingId(null);
+    setDraftActive(false);
     setReviewKey(trip.key);
     setSuggestFor(null);
     setLookups({});
@@ -759,6 +858,7 @@ export function TripApp() {
       setTripStates(states);
       setTripEdits((prev) => ({ ...prev, [key]: { text, sheet } }));
       setReviewKey(null);
+      setDraftActive(false);
       setView(trips.every((t) => states[t.key]?.state === "added") ? "day" : "review");
       return;
     }
@@ -769,6 +869,8 @@ export function TripApp() {
       copy[idx] = saved;
       return copy;
     });
+    setDrafts((prev) => prev.filter((draft) => draft.id !== draftId));
+    setDraftActive(false);
     setView("day");
   }
 
@@ -951,6 +1053,23 @@ export function TripApp() {
                 )}
               </div>
             </div>
+          )}
+          {draftsReady && drafts.length > 0 && (
+            <section aria-label="Unfinished drafts" className="space-y-2">
+              {drafts.map((draft) => {
+                const title = [draft.sheet.route, draft.sheet.run].filter(Boolean).join(" ");
+                return (
+                  <article key={draft.id} className="rounded-xl border border-[#d9d2c3] bg-[#fffaf0] p-3">
+                    <p className="text-sm font-semibold">Unfinished work{title ? ` · ${title}` : ""}</p>
+                    <p className="mt-1 text-xs text-[#3d4b63]">{draft.sheet.stops.length} stops · saved on this phone</p>
+                    <div className="mt-2 flex gap-2">
+                      <Button type="button" className="h-10 flex-1 bg-[#0f2744] text-white" onClick={() => resumeDraft(draft)}>Resume editing</Button>
+                      <Button type="button" variant="outline" className="h-10 px-3 text-[#7f1d1d]" onClick={() => discardDraft(draft)}>Discard</Button>
+                    </div>
+                  </article>
+                );
+              })}
+            </section>
           )}
           {runs.map((run, i) => {
             const warnings = run.warnings.filter((w) => w.level === "warn");
@@ -1152,7 +1271,7 @@ export function TripApp() {
       )}
 
       {view === "edit" && (
-        <section className="flex flex-col gap-3 px-4 py-4 pb-48">
+        <section className="flex flex-col gap-2 px-4 py-3 pb-48">
           {reviewTrip && (
             <div className="rounded-xl bg-white p-3 ring-1 ring-[#d9d2c3]" data-trip-open={reviewTrip.run || reviewTrip.key}>
               <p className="text-lg font-semibold">
@@ -1239,10 +1358,10 @@ export function TripApp() {
             </div>
           )}
           {sheet.stops.length > 0 && (
-            <div className="space-y-3">
+            <div className="space-y-2">
               <div className="grid grid-cols-2 gap-2">
-                <Input className="h-12 bg-white text-base" value={sheet.route} placeholder="Route" aria-label="Route" onChange={(e) => setSheet({ ...sheet, route: e.target.value })} />
-                <Input className="h-12 bg-white text-base" value={sheet.run} placeholder="Run" aria-label="Run" onChange={(e) => setSheet({ ...sheet, run: e.target.value })} />
+                <Input className="h-10 bg-white text-base" value={sheet.route} placeholder="Route" aria-label="Route" onChange={(e) => setSheet({ ...sheet, route: e.target.value })} />
+                <Input className="h-10 bg-white text-base" value={sheet.run} placeholder="Run" aria-label="Run" onChange={(e) => setSheet({ ...sheet, run: e.target.value })} />
               </div>
               <WrapField
                 value={sheet.description}
@@ -1254,8 +1373,8 @@ export function TripApp() {
                 const stopCheck = stopState(stop.description);
                 const sid = `stop-${si}`;
                 return (
-                  <div key={si} className="rounded-xl bg-white p-3 ring-1 ring-[#d9d2c3]" data-stop={si}>
-                    <div className="mb-2 flex items-center justify-between gap-2">
+                  <div key={si} className="rounded-xl bg-white p-2.5 ring-1 ring-[#d9d2c3]" data-stop={si}>
+                    <div className="mb-1 flex items-center justify-between gap-2">
                       <p className="text-sm font-semibold">Stop {si + 1}</p>
                       <button
                         type="button"
@@ -1267,7 +1386,7 @@ export function TripApp() {
                       </button>
                     </div>
                     <div className="flex items-end gap-2">
-                      <Input className="h-11 w-32 shrink-0 bg-white text-base" value={stop.time} aria-label="Stop time" onChange={(e) => setSheet({ ...sheet, stops: sheet.stops.map((s, i) => (i === si ? { ...s, time: e.target.value } : s)) })} />
+                      <Input className="h-10 w-32 shrink-0 bg-white text-base" value={stop.time} aria-label="Stop time" onChange={(e) => setSheet({ ...sheet, stops: sheet.stops.map((s, i) => (i === si ? { ...s, time: e.target.value } : s)) })} />
                       <StreetMark state={stopCheck.state} open={suggestFor === sid} onTap={() => void tapMark(sid, stopCheck.missing)} />
                     </div>
                     <WrapField
@@ -1292,7 +1411,7 @@ export function TripApp() {
                         }}
                       />
                     )}
-                    <ul className="mt-2 space-y-1.5">
+                    <ul className="mt-1.5 space-y-1">
                       {stop.maneuvers.map((m, mi) => {
                         const st = streetState(m.street);
                         const mid = `${si}-${mi}`;
@@ -1303,10 +1422,10 @@ export function TripApp() {
                           : null;
                         const nearbyTargetRoad = targetRoad && targetRoad.distance <= 0.015 ? targetRoad : null;
                         return (
-                          <li key={mi} className="rounded-lg bg-[#f6f3ea] p-1.5">
+                          <li key={mi} className="rounded-lg bg-[#f6f3ea] p-1">
                             <div className="flex items-center gap-2">
                               <select
-                                className="h-11 min-w-0 flex-1 rounded-lg border border-[#d9d2c3] bg-white px-2 text-base"
+                                className="h-10 min-w-0 flex-1 rounded-lg border border-[#d9d2c3] bg-white px-2 text-base"
                                 value={m.kind}
                                 aria-label="Direction"
                                 onChange={(e) => updateManeuver(si, mi, { kind: e.target.value as ManeuverKind })}
@@ -1320,7 +1439,7 @@ export function TripApp() {
                               <StreetMark state={st.state} open={suggestFor === mid} onTap={() => void tapMark(mid, st.state === "found" ? [] : [m.street])} />
                               <button
                                 type="button"
-                                className="h-11 touch-manipulation rounded-lg border border-[#d9d2c3] bg-white px-3 text-base"
+                                className="h-10 touch-manipulation rounded-lg border border-[#d9d2c3] bg-white px-3 text-base"
                                 aria-label="Delete this direction"
                                 onClick={() => setSheet({ ...sheet, stops: sheet.stops.map((s, i) => (i === si ? { ...s, maneuvers: s.maneuvers.filter((_, j) => j !== mi) } : s)) })}
                               >
@@ -1407,7 +1526,7 @@ export function TripApp() {
                     <Button
                       type="button"
                       variant="outline"
-                      className="mt-2 h-10"
+                      className="mt-1.5 h-9"
                       onClick={() =>
                         setSheet({
                           ...sheet,
@@ -1437,8 +1556,8 @@ export function TripApp() {
               {status && <p className="text-sm font-medium">{status}</p>}
               {error && <p className="text-sm text-[#7f1d1d]">{error}</p>}
               <div className="flex gap-2">
-                <Button type="button" variant="outline" className="h-12 flex-1" onClick={() => (reviewTrip ? backToTrips() : setView("day"))}>
-                  {reviewTrip ? "Back to trips" : "Back"}
+                <Button type="button" variant="outline" className="h-12 flex-1" onClick={saveDraftAndBack}>
+                  {reviewTrip ? "Back to trips" : draftActive && (sheet.stops.length > 0 || text.trim()) ? "Save draft & back" : "Back"}
                 </Button>
                 <Button type="button" className="h-12 flex-[2] bg-[#0f2744] text-base text-white disabled:opacity-100" disabled={(!sheet.stops.length && !text.trim()) || !!status} onClick={() => void generate()}>
                   {status ? "Building…" : "Build the route"}
@@ -1719,7 +1838,7 @@ function WrapField({
       autoCorrect="off"
       autoCapitalize="off"
       enterKeyHint={multiline ? "enter" : "done"}
-      className={`block w-full resize-none overflow-hidden rounded-lg border border-[#d9d2c3] bg-white px-3 py-2.5 text-base leading-snug break-words whitespace-pre-wrap ${multiline ? "min-h-36" : ""} ${className}`}
+      className={`block w-full min-h-10 resize-none overflow-hidden rounded-lg border border-[#d9d2c3] bg-white px-3 py-2 text-base leading-snug break-words whitespace-pre-wrap ${multiline ? "min-h-36" : ""} ${className}`}
       onChange={(e) => {
         onChange(multiline ? e.target.value : e.target.value.replace(/\n/g, " "));
         fit(e.currentTarget);
