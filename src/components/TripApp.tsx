@@ -619,7 +619,7 @@ export function TripApp() {
     setMapFocus({ lat: stop.lat, lon: stop.lon, key: ++mapFocusKey.current });
     setMapFixContext({ stopIndex, message, street });
     setTapMode("via");
-    document.querySelector(".leaflet-container")?.scrollIntoView({ behavior: "smooth", block: "center" });
+    document.querySelector("[data-route-map]")?.scrollIntoView({ behavior: "smooth", block: "center" });
   }
 
   function editWarning(stopIndex: number, maneuverIndex: number) {
@@ -682,6 +682,8 @@ export function TripApp() {
     if (!route || !tapMode || status) return;
     if (tapMode === "turn" && pick) {
       const next = { ...overrides, turnarounds: { ...overrides.turnarounds, [pick]: { lat, lon } } };
+      setTapMode(null);
+      setPick(null);
       void generate(next);
       return;
     }
@@ -1350,23 +1352,7 @@ export function TripApp() {
               <span>I checked each warning against the trip sheet and road layout.</span>
             </label>
           )}
-          {tapMode === "via" && (
-            <div className="rounded-lg border-2 border-[#0f2744] bg-white p-3 text-sm" role="status">
-              {mapFixContext ? (
-                <>
-                  <p className="font-bold">Guiding stop {mapFixContext.stopIndex + 1} on the map</p>
-                  <p className="mt-1">{mapFixContext.message}</p>
-                </>
-              ) : <p className="font-bold">Add a point the route must pass.</p>}
-              <p className="mt-1">
-                {mapFixContext?.street
-                  ? <>Tap <strong>{mapFixContext.street}</strong> near stop {mapFixContext.stopIndex + 1}, where the bus should enter that road. A blue dot will appear and the route will rebuild.</>
-                  : "Tap the road the bus should use near this stop. A blue dot will appear and the route will rebuild."}
-              </p>
-              <Button type="button" variant="outline" className="mt-2 h-10" onClick={() => { setTapMode(null); setMapFixContext(null); }}>Cancel</Button>
-            </div>
-          )}
-          <div className="relative">
+          <div className="relative" data-route-map>
             <RouteMap
               coords={route.coords}
               stops={previewStops}
@@ -1378,9 +1364,30 @@ export function TripApp() {
               focusPoint={mapFocus}
               vias={overrides.vias ?? []}
               selectedTurnaround={pick}
-              picking={tapMode === "via"}
+              picking={tapMode !== null}
               onMapClick={onMapClick}
             />
+            {tapMode !== null && (
+              <div className="pointer-events-none absolute left-12 right-3 top-3 z-[1100] rounded-lg border-2 border-[#0f2744] bg-white/95 p-3 text-sm shadow-lg" role="status">
+                {tapMode === "turn" ? (
+                  <>
+                    <p className="font-bold">Move the turnaround</p>
+                    <p className="mt-1">Tap the road where the bus should turn around. The route rebuilds after your tap.</p>
+                  </>
+                ) : (
+                  <>
+                    <p className="font-bold">
+                      {mapFixContext ? `Guide stop ${mapFixContext.stopIndex + 1} on the map` : "Add a point the route must pass"}
+                    </p>
+                    <p className="mt-1">
+                      {mapFixContext?.street
+                        ? <>Tap the road near stop {mapFixContext.stopIndex + 1}{" "}where the bus should enter <strong>{mapFixContext.street}</strong>. Tap the road, not the numbered stop marker. The route rebuilds after your tap.</>
+                        : "Tap the road the bus should use. The route rebuilds after your tap."}
+                    </p>
+                  </>
+                )}
+              </div>
+            )}
           </div>
           <details open className="rounded-lg bg-white p-3 ring-1 ring-[#d9d2c3]">
             <summary className="cursor-pointer text-base font-semibold">Stops and turns · {sheet.stops.length}</summary>
@@ -1465,6 +1472,7 @@ export function TripApp() {
                     onClick={() => {
                       setPick(t.id);
                       setTapMode("turn");
+                      requestAnimationFrame(() => document.querySelector("[data-route-map]")?.scrollIntoView({ behavior: "smooth", block: "center" }));
                     }}
                   >
                     Move
@@ -1475,48 +1483,53 @@ export function TripApp() {
           )}
           <div className="fixed inset-x-0 bottom-0 z-30 border-t border-[#d9d2c3] bg-[#f6f3ea] p-3">
             <div className="mx-auto flex max-w-lg flex-col gap-2">
-              <Button
-                type="button"
-                className={`h-12 text-base ${tapMode === "via" ? "bg-[#f5c451] text-[#142033]" : "bg-[#0f2744] text-white"}`}
-                onClick={() => {
-                  if (tapMode === "via") {
-                    setTapMode(null);
-                    setMapFixContext(null);
-                  } else {
-                    setTapMode("via");
-                    setMapFixContext(null);
-                  }
-                }}
-              >
-                {tapMode === "via" ? "Cancel map point" : "Add a point on map"}
-              </Button>
-              {editingLockedRun && <p className="rounded-lg border border-[#246b36] bg-[#e8f3e8] p-2 text-sm text-[#173b22]">This GPX is locked. Your saved track stays safe; unlock it from today’s list before replacing it with this route.</p>}
-              <Button type="button" className="h-12 bg-[#0f2744] text-base text-white" disabled={!!status || editingLockedRun || (route.warnings.some((w) => w.level === "warn") && !warningAcknowledged)} onClick={saveToDay}>
-                {editingLockedRun ? "Unlock GPX to replace it" : "Add to today’s list"}
-              </Button>
-              <div className="grid grid-cols-2 gap-2">
-                <Button type="button" variant="outline" className="h-12" onClick={() => setView("edit")}>
-                  Edit directions
-                </Button>
+              {tapMode !== null ? (
                 <Button
                   type="button"
                   variant="outline"
-                  className="h-12"
-                  disabled={!!status || (route.warnings.some((w) => w.level === "warn") && !warningAcknowledged)}
-                  onClick={() =>
-                    downloadBlob(
-                      runFileName(0, {
-                        run: sheet.run,
-                        description: sheet.description,
-                        firstTime: sheet.stops[0]?.time ?? "",
-                      }),
-                      new Blob([buildGpx(sheet, route.coords, route.stops)], { type: "application/octet-stream" }),
-                    )
-                  }
+                  className="h-12 w-full bg-white text-base"
+                  onClick={() => { setTapMode(null); setMapFixContext(null); setPick(null); }}
                 >
-                  Download GPX
+                  Cancel map fix
                 </Button>
-              </div>
+              ) : (
+                <>
+                  <Button
+                    type="button"
+                    className="h-12 bg-[#0f2744] text-base text-white"
+                    onClick={() => { setTapMode("via"); setMapFixContext(null); }}
+                  >
+                    Add a point on map
+                  </Button>
+                  {editingLockedRun && <p className="rounded-lg border border-[#246b36] bg-[#e8f3e8] p-2 text-sm text-[#173b22]">This GPX is locked. Your saved track stays safe; unlock it from today’s list before replacing it with this route.</p>}
+                  <Button type="button" className="h-12 bg-[#0f2744] text-base text-white" disabled={!!status || editingLockedRun || (route.warnings.some((w) => w.level === "warn") && !warningAcknowledged)} onClick={saveToDay}>
+                    {editingLockedRun ? "Unlock GPX to replace it" : "Add to today’s list"}
+                  </Button>
+                  <div className="grid grid-cols-2 gap-2">
+                    <Button type="button" variant="outline" className="h-12" onClick={() => setView("edit")}>
+                      Edit directions
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="h-12"
+                      disabled={!!status || (route.warnings.some((w) => w.level === "warn") && !warningAcknowledged)}
+                      onClick={() =>
+                        downloadBlob(
+                          runFileName(0, {
+                            run: sheet.run,
+                            description: sheet.description,
+                            firstTime: sheet.stops[0]?.time ?? "",
+                          }),
+                          new Blob([buildGpx(sheet, route.coords, route.stops)], { type: "application/octet-stream" }),
+                        )
+                      }
+                    >
+                      Download GPX
+                    </Button>
+                  </div>
+                </>
+              )}
             </div>
           </div>
         </section>
