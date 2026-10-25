@@ -28,6 +28,19 @@ function FocusPoint({ point }: { point?: { lat: number; lon: number; key: number
   return null;
 }
 
+function FocusArea({ points }: { points?: LonLat[] }) {
+  const map = useMap();
+  useEffect(() => {
+    if (!points || points.length < 2) return;
+    map.fitBounds(L.latLngBounds(points.map(([lon, lat]) => [lat, lon] as [number, number])), {
+      padding: [36, 36],
+      maxZoom: 16,
+      animate: false,
+    });
+  }, [map, points]);
+  return null;
+}
+
 function Clicks({ onClick }: { onClick?: (lat: number, lon: number) => void }) {
   useMapEvents({
     click(e) {
@@ -52,6 +65,8 @@ export default function RouteMap({
   turnarounds,
   vias = [],
   warningStops = [],
+  highlightedLines = [],
+  focusArea,
   focusPoint,
   selectedTurnaround,
   picking = false,
@@ -62,6 +77,8 @@ export default function RouteMap({
   turnarounds: TurnaroundPin[];
   vias?: { lat: number; lon: number }[];
   warningStops?: StopPin[];
+  highlightedLines?: LonLat[][];
+  focusArea?: LonLat[];
   focusPoint?: { lat: number; lon: number; key: number };
   selectedTurnaround?: string | null;
   /** The next tap should add a via, so the map takes the touch instead of the page. */
@@ -79,10 +96,14 @@ export default function RouteMap({
       />
       <Fit coords={coords} />
       <FocusPoint point={focusPoint} />
+      <FocusArea points={focusArea} />
       <Clicks onClick={onMapClick} />
       {coords.length > 1 && (
         <Polyline positions={coords.map((c) => [c[1], c[0]] as [number, number])} pathOptions={{ color: "#0f2744", weight: 5, opacity: 0.9 }} />
       )}
+      {highlightedLines.map((line, i) => line.length > 1 && (
+        <Polyline key={`highlight-${i}`} positions={line.map(([lon, lat]) => [lat, lon] as [number, number])} pathOptions={{ color: "#e11d48", weight: 8, opacity: 0.95, dashArray: "8 8" }} />
+      ))}
       {stops.map((s, i) => (
         <Marker key={`${s.lat}-${s.lon}-${i}`} position={[s.lat, s.lon]} icon={numberIcon(i + 1)} title={s.label} />
       ))}
