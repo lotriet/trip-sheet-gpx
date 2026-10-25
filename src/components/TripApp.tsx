@@ -1373,12 +1373,12 @@ export function TripApp() {
                 const stopCheck = stopState(stop.description);
                 const sid = `stop-${si}`;
                 return (
-                  <div key={si} className="rounded-xl bg-white p-2 ring-1 ring-[#d9d2c3]" data-stop={si}>
-                    <div className="mb-1 flex items-center justify-between gap-2">
-                      <p className="text-sm font-semibold">Stop {si + 1}</p>
+                  <div key={si} className="rounded-2xl bg-white p-2.5 shadow-[0_2px_8px_rgba(20,32,51,0.07)] ring-1 ring-[#d4ccbb]" data-stop={si}>
+                    <div className="mb-2 flex items-center justify-between gap-2 border-b border-[#ece7dc] pb-1.5">
+                      <p className="rounded-full bg-[#e9eff7] px-2.5 py-1 text-xs font-bold tracking-wide text-[#0f2744]">STOP {si + 1}</p>
                       <button
                         type="button"
-                        className="h-9 touch-manipulation rounded-lg border border-[#d9d2c3] bg-white px-2.5 text-sm text-[#7f1d1d]"
+                        className="h-9 touch-manipulation rounded-lg border border-[#efd6d2] bg-[#fff8f6] px-2.5 text-sm font-medium text-[#8f2c1c]"
                         aria-label={`Delete stop ${si + 1}`}
                         onClick={() => deleteStop(si)}
                       >
@@ -1390,9 +1390,10 @@ export function TripApp() {
                       <StreetMark state={stopCheck.state} open={suggestFor === sid} onTap={() => void tapMark(sid, stopCheck.missing)} />
                     </div>
                     <WrapField
-                      className="mt-1"
+                      className="mt-1 border-[#c9c1b2]"
                       value={stop.description}
                       label="Stop place"
+                      placeholder="Stop intersection, school, or address"
                       onChange={(description) => setSheet({ ...sheet, stops: sheet.stops.map((s, i) => (i === si ? { ...s, description } : s)) })}
                       onBlur={() => void recheckSoon()}
                     />
@@ -1411,7 +1412,11 @@ export function TripApp() {
                         }}
                       />
                     )}
-                    <ul className="mt-1 space-y-1">
+                    <div className="mb-1 mt-2 flex items-center gap-2">
+                      <span className="text-[0.68rem] font-bold uppercase tracking-[0.12em] text-[#596579]">Directions</span>
+                      <span className="h-px flex-1 bg-[#e3e8ef]" />
+                    </div>
+                    <ul className="space-y-1.5">
                       {stop.maneuvers.map((m, mi) => {
                         const st = streetState(m.street);
                         const mid = `${si}-${mi}`;
@@ -1422,9 +1427,9 @@ export function TripApp() {
                           : null;
                         const nearbyTargetRoad = targetRoad && targetRoad.distance <= 0.015 ? targetRoad : null;
                         return (
-                          <li key={mi} className="grid grid-cols-[minmax(0,0.85fr)_minmax(0,1fr)_2rem_2.25rem] items-center gap-1 rounded-lg bg-[#f6f3ea] p-1">
+                          <li key={mi} className="grid grid-cols-[minmax(0,0.85fr)_minmax(0,1fr)_2rem_2.25rem] items-center gap-1 rounded-xl bg-[#edf2f8] p-1.5 ring-1 ring-inset ring-[#dce4ee]">
                               <select
-                                className="h-9 min-w-0 rounded-lg border border-[#d9d2c3] bg-white px-1.5 text-sm"
+                                className="h-9 min-w-0 rounded-lg border border-[#cbd5e1] bg-white px-1.5 text-sm text-[#17243a]"
                                 value={m.kind}
                                 aria-label="Direction"
                                 onChange={(e) => updateManeuver(si, mi, { kind: e.target.value as ManeuverKind })}
@@ -1446,7 +1451,7 @@ export function TripApp() {
                               <StreetMark state={st.state} open={suggestFor === mid} onTap={() => void tapMark(mid, st.state === "found" ? [] : [m.street])} />
                               <button
                                 type="button"
-                                className="h-9 w-9 touch-manipulation rounded-lg border border-[#d9d2c3] bg-white text-sm"
+                                className="h-9 w-9 touch-manipulation rounded-lg border border-[#edd5d2] bg-white text-sm text-[#8f2c1c]"
                                 aria-label="Delete this direction"
                                 onClick={() => setSheet({ ...sheet, stops: sheet.stops.map((s, i) => (i === si ? { ...s, maneuvers: s.maneuvers.filter((_, j) => j !== mi) } : s)) })}
                               >
@@ -1525,7 +1530,7 @@ export function TripApp() {
                     <Button
                       type="button"
                       variant="outline"
-                              className="mt-1 h-8 px-2 text-xs"
+                              className="mt-1 h-8 border-dashed border-[#9aabc1] bg-[#f8fbff] px-2 text-xs text-[#173b64]"
                       onClick={() =>
                         setSheet({
                           ...sheet,
@@ -1940,7 +1945,7 @@ function SuggestPanel({
 function StreetMark({ state, open, onTap }: { state: string; open: boolean; onTap: () => void }) {
   if (state === "found") {
     return (
-      <span className="flex h-9 w-8 items-center justify-center text-base font-bold text-[#15803d]" aria-label="Street found on the map">
+      <span className="mx-auto flex h-7 w-7 items-center justify-center rounded-full bg-[#e6f3e9] text-sm font-bold text-[#176b36] ring-1 ring-[#c4e1cc]" aria-label="Street found on the map">
         ✓
       </span>
     );
@@ -1949,7 +1954,7 @@ function StreetMark({ state, open, onTap }: { state: string; open: boolean; onTa
     return (
       <button
         type="button"
-        className={`h-9 w-8 rounded-lg text-base font-bold text-white ${open ? "bg-[#7f1d1d]" : "bg-[#dc2626]"}`}
+        className={`h-9 w-8 rounded-full text-base font-bold text-white shadow-sm ${open ? "bg-[#7f1d1d]" : "bg-[#dc2626]"}`}
         aria-label="Street not found. Show close matches"
         onClick={onTap}
       >
@@ -1959,13 +1964,13 @@ function StreetMark({ state, open, onTap }: { state: string; open: boolean; onTa
   }
   if (state === "looking") {
     return (
-      <span className="flex h-9 w-8 items-center justify-center" aria-label="Looking up the name">
+      <span className="mx-auto flex h-7 w-7 items-center justify-center rounded-full bg-[#fff5dc]" aria-label="Looking up the name">
         <span className="h-5 w-5 animate-spin rounded-full border-2 border-[#d9d2c3] border-t-[#0f2744]" />
       </span>
     );
   }
   if (state === "checking") {
-    return <span className="flex h-9 w-8 items-center justify-center text-[#9ca3af]" aria-label="Checking the street">…</span>;
+    return <span className="mx-auto flex h-7 w-7 items-center justify-center rounded-full bg-[#f0f2f4] text-xs text-[#657084]" aria-label="Checking the street">…</span>;
   }
   return <span className="w-9" aria-hidden />;
 }
