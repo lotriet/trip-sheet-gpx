@@ -1005,12 +1005,18 @@ export function TripApp() {
           const maneuver = destinationWarning ? undefined : sheet.stops[w.stopIndex]?.maneuvers[w.maneuverIndex];
           return (
             <div key={`${i}-${w.stopIndex}-${w.maneuverIndex}`} data-route-warning={warningIndex} className={`rounded-lg p-3 text-sm ${w.level === "warn" ? "bg-[#ffedd5]" : "bg-white ring-1 ring-[#d9d2c3]"}`}>
+              {w.level === "warn" && stop && (
+                <div className="mb-1 rounded-md bg-white/70 px-2 py-1.5 text-xs text-[#394861]">
+                  <p className="font-semibold">Stop {w.stopIndex + 1}{sheet.stops[w.stopIndex]?.time ? ` · ${sheet.stops[w.stopIndex].time}` : ""}</p>
+                  {maneuver && <p className="mt-0.5">{KIND_LABEL[maneuver.kind]} {maneuver.street || "[street missing]"}</p>}
+                </div>
+              )}
               <p>{w.message}</p>
               {w.level === "warn" && (
                 <div className="mt-2 flex flex-wrap gap-2">
                   {stop && <Button type="button" variant="outline" className="h-10 bg-white" onClick={() => showWarningOnMap(w.stopIndex)}>Show stop on map</Button>}
                   {stop && <Button type="button" variant="outline" className="h-10 bg-white" onClick={() => focusWarning(w.stopIndex, w.message, maneuver?.street)}>Guide on map</Button>}
-                  {maneuver && <Button type="button" variant="outline" className="h-10 bg-white" onClick={() => editWarning(w.stopIndex, w.maneuverIndex)}>Edit direction</Button>}
+                  {maneuver && <Button type="button" variant="outline" className="h-10 bg-white" onClick={() => editWarning(w.stopIndex, w.maneuverIndex)}>Edit this turn</Button>}
                 </div>
               )}
             </div>
