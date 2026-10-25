@@ -676,6 +676,22 @@ export function TripApp() {
     void generate(overrides, nextSheet);
   }
 
+  function deleteWarningDirection() {
+    if (!warningFix) return;
+    const nextSheet: Sheet = {
+      ...sheet,
+      stops: sheet.stops.map((stop, si) => si !== warningFix.stopIndex ? stop : {
+        ...stop,
+        maneuvers: stop.maneuvers.filter((_, mi) => mi !== warningFix.maneuverIndex),
+      }),
+    };
+    setSheet(nextSheet);
+    setWarningFix(null);
+    setTapMode(null);
+    setMapFixContext(null);
+    void generate(overrides, nextSheet);
+  }
+
   function renderWarnings() {
     if (!route) return null;
     return (
@@ -1149,7 +1165,7 @@ export function TripApp() {
           <Tucked
             away={!!reviewTrip || hasStops}
             summary={hasStops
-              ? `Original scan & text · ${sheet.stops.length} stops recognized`
+              ? `Edit original scan & trip-sheet text · ${sheet.stops.length} stops`
               : "Original scan, sheet text & area"}
           >
           <label className="text-sm font-medium">
@@ -1535,6 +1551,20 @@ export function TripApp() {
                           <Button type="button" variant="outline" className="h-10 flex-1" onClick={() => setWarningFix(null)}>Cancel</Button>
                           <Button type="button" className="h-10 flex-1 bg-[#0f2744] text-white" disabled={!warningFix.street.trim() || !!status} onClick={rebuildWarningFix}>Save and rebuild</Button>
                         </div>
+                        <Button type="button" variant="destructive" className="h-10 w-full" disabled={!!status} onClick={deleteWarningDirection}>Delete this direction and rebuild</Button>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          className="h-10 w-full"
+                          disabled={!!status}
+                          onClick={() => {
+                            setWarningFix(null);
+                            setView("edit");
+                            window.scrollTo(0, 0);
+                          }}
+                        >
+                          Open full trip-sheet text editor
+                        </Button>
                       </div>
                     )}
                   </li>
