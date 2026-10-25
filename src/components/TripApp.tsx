@@ -515,6 +515,7 @@ export function TripApp() {
     setEditingId(run.id);
     setDraftId(`run-${run.id}`);
     setDraftActive(true);
+    setWarningAcknowledged(run.warningsAcknowledged ?? false);
     setDirectionMapStop(null);
     setText(run.sheetText);
     setArea(run.area || area);
@@ -693,7 +694,7 @@ export function TripApp() {
     if (reviewKey === from) setReviewKey(null);
   }
 
-  function savedRunFrom(id: string, sheetText: string, built: Sheet, result: RouteSuccess, vias: { lat: number; lon: number; street?: string }[] = []): SavedRun {
+  function savedRunFrom(id: string, sheetText: string, built: Sheet, result: RouteSuccess, vias: { lat: number; lon: number; street?: string }[] = [], warningsAcknowledged = false): SavedRun {
     return {
       id,
       area,
@@ -707,6 +708,7 @@ export function TripApp() {
       coords: result.coords,
       stops: result.stops.map((s) => ({ time: s.time, description: s.description, lat: s.lat, lon: s.lon })),
       warnings: result.warnings.map((w) => ({ ...w })),
+      warningsAcknowledged,
       vias,
     };
   }
@@ -979,7 +981,7 @@ export function TripApp() {
       <section aria-label="Route issues" className="space-y-2">
         {issueCount > 0 && (
           <div className="flex items-center justify-between gap-3 rounded-xl border border-[#f0d28d] bg-[#fff9ea] px-3 py-2">
-            <p className="text-sm font-semibold text-[#68470b]">{issueCount} {issueCount === 1 ? "issue" : "issues"} to review</p>
+            <p className="text-sm font-semibold text-[#68470b]">{warningAcknowledged ? `${issueCount} warning${issueCount === 1 ? "" : "s"} acknowledged` : `${issueCount} ${issueCount === 1 ? "issue" : "issues"} to review`}</p>
             <Button type="button" variant="outline" className="h-8 shrink-0 border-[#e5c981] bg-white px-2.5 text-xs font-semibold text-[#68470b]" onClick={() => {
               const target = warningCursor % issueCount;
               document.querySelector<HTMLElement>(`[data-route-warning="${target}"]`)?.scrollIntoView({ behavior: "smooth", block: "center" });
@@ -1037,7 +1039,7 @@ export function TripApp() {
       setError("This GPX is locked. Return to today’s list and unlock it before replacing the saved track.");
       return;
     }
-    const saved = savedRunFrom(editingId ?? newId(), text, sheet, route, overrides.vias ?? []);
+    const saved = savedRunFrom(editingId ?? newId(), text, sheet, route, overrides.vias ?? [], warningAcknowledged);
     const willFinishReview = !reviewKey || trips.every((trip) => trip.key === reviewKey || tripStates[trip.key]?.state === "added");
     const file = {
       name: runFileName(0, { run: saved.run, description: saved.description, firstTime: saved.firstTime }),
@@ -1277,7 +1279,7 @@ export function TripApp() {
                 <p className="text-lg font-bold tracking-tight">{runs.length} {runs.length === 1 ? "run" : "runs"} · {runs.reduce((sum, run) => sum + run.miles, 0).toFixed(1)} mi</p>
               </div>
               <div className="flex items-center gap-2">
-                {runs.some((run) => run.warnings.some((warning) => warning.level === "warn")) && (
+                {runs.some((run) => !run.warningsAcknowledged && run.warnings.some((warning) => warning.level === "warn")) && (
                   <Button
                     type="button"
                     variant="outline"
@@ -1310,7 +1312,7 @@ export function TripApp() {
           {runs.map((run, i) => {
             const warnings = run.warnings.filter((w) => w.level === "warn");
                 return (
-            <article key={run.id} data-warning-run={warnings.length ? "true" : undefined} className="rounded-2xl border border-[#dce3ec] bg-white p-3.5 shadow-[0_4px_14px_rgba(24,39,62,0.07)] transition-shadow hover:shadow-[0_7px_20px_rgba(24,39,62,0.1)]">
+            <article key={run.id} data-warning-run={warnings.length && !run.warningsAcknowledged ? "true" : undefined} className="rounded-2xl border border-[#dce3ec] bg-white p-3.5 shadow-[0_4px_14px_rgba(24,39,62,0.07)] transition-shadow hover:shadow-[0_7px_20px_rgba(24,39,62,0.1)]">
               <div className="flex items-start gap-3">
                 <div className="flex shrink-0 flex-col items-center gap-1">
                   <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-[#173b64] text-sm font-bold text-white">{i + 1}</span>
@@ -1328,8 +1330,8 @@ export function TripApp() {
                 </div>
               </div>
               {warnings.length > 0 && (
-                <div className="mt-3 rounded-xl border border-[#f0d28d] border-l-4 border-l-[#d28b16] bg-[#fff9ea] p-3" role="alert">
-                  <p className="text-xs font-bold uppercase tracking-wide text-[#80540b]">Needs a quick check · {warnings.length} {warnings.length === 1 ? "issue" : "issues"}</p>
+                <div className={`mt-3 rounded-xl border border-[#f0d28d] border-l-4 border-l-[#d28b16] p-3 ${run.warningsAcknowledged ? "bg-[#fffdf5]" : "bg-[#fff9ea]"}`} role={run.warningsAcknowledged ? "status" : "alert"}>
+                  <p className="text-xs font-bold uppercase tracking-wide text-[#80540b]">{run.warningsAcknowledged ? `Reviewed · ${warnings.length} route warning${warnings.length === 1 ? "" : "s"} remain${warnings.length === 1 ? "s" : ""}` : `Needs a quick check · ${warnings.length} ${warnings.length === 1 ? "issue" : "issues"}`}</p>
                   <p className="mt-1 text-sm leading-relaxed text-[#463716]">{warnings[0].message}</p>
                   {warnings.length > 1 && (
                     <details className="mt-1 text-sm">
@@ -1365,8 +1367,8 @@ export function TripApp() {
                 <Button type="button" variant="outline" className="h-9 border-[#dce3ed] bg-[#f8fafc] text-xs font-semibold text-[#34445c]" onClick={() => openEdit(run)} disabled={exportingDay}>
                   Edit
                 </Button>
-                <Button type="button" variant="outline" className="h-9 border-[#dce3ed] bg-[#f8fafc] text-xs font-semibold text-[#34445c]" onClick={() => void deliverGpx([{ name: runFileName(i, run), text: run.gpx }], runFileName(i, run), "single")}>
-                  Download
+                <Button type="button" variant="outline" className="h-9 border-[#dce3ed] bg-[#f8fafc] text-xs font-semibold text-[#34445c]" onClick={() => warnings.length && !run.warningsAcknowledged ? openEdit(run) : void deliverGpx([{ name: runFileName(i, run), text: run.gpx }], runFileName(i, run), "single")}>
+                  {warnings.length && !run.warningsAcknowledged ? "Review" : "Download"}
                 </Button>
               </div>
               <details className="mt-2 border-t border-[#edf0f4] pt-2">
@@ -1992,9 +1994,9 @@ export function TripApp() {
             <div className="mx-auto flex max-w-2xl flex-col gap-2">
               {routeBuilding && <RouteBuildStatus message={status} />}
               {route.warnings.some((warning) => warning.level === "warn") && (
-                <label className="flex cursor-pointer items-center gap-2 rounded-lg border border-[#e5bd77] bg-[#fff8e9] px-2.5 py-2 text-xs text-[#59451f]">
+                <label className={`flex cursor-pointer items-center gap-2 rounded-lg border px-2.5 py-2 text-xs ${warningAcknowledged ? "border-[#b8d6bf] bg-[#f0f8f2] text-[#245b34]" : "border-[#e5bd77] bg-[#fff8e9] text-[#59451f]"}`}>
                   <input type="checkbox" className="h-4 w-4 shrink-0 accent-[#173b64]" checked={warningAcknowledged} onChange={(e) => setWarningAcknowledged(e.target.checked)} />
-                  <span><strong>Review {route.warnings.filter((warning) => warning.level === "warn").length} warning{route.warnings.filter((warning) => warning.level === "warn").length === 1 ? "" : "s"}</strong><span className="ml-1">to enable GPX export.</span></span>
+                  <span><strong>{warningAcknowledged ? "Warnings acknowledged." : `Review ${route.warnings.filter((warning) => warning.level === "warn").length} warning${route.warnings.filter((warning) => warning.level === "warn").length === 1 ? "" : "s"}.`}</strong><span className="ml-1">{warningAcknowledged ? "GPX export is enabled." : "Check this after reviewing to enable export."}</span></span>
                 </label>
               )}
               {tapMode !== null ? (
