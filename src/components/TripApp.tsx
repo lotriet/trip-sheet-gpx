@@ -1,7 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { ArrowUp, CornerUpLeft, CornerUpRight, RotateCcw } from "lucide-react";
+import { ArrowUp, CornerUpLeft, CornerUpRight, LoaderCircle, RotateCcw } from "lucide-react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -84,6 +84,15 @@ function ManeuverArrow({ kind }: { kind: ManeuverKind }) {
   return <Icon aria-hidden="true" className="h-3.5 w-3.5 shrink-0 text-[#315d8c]" strokeWidth={2.5} />;
 }
 
+function RouteBuildStatus({ message }: { message: string }) {
+  return (
+    <div className="flex items-center gap-2 rounded-lg border border-[#cbd9eb] bg-[#f3f7fc] px-3 py-2 text-xs text-[#34445c]" role="status" aria-live="polite">
+      <LoaderCircle aria-hidden="true" className="h-4 w-4 shrink-0 animate-spin text-[#315d8c]" />
+      <span className="min-w-0"><strong className="mr-1">Building your route.</strong>{message || "Finding roads and connecting stops…"}</span>
+    </div>
+  );
+}
+
 function emptySheet(): Sheet {
   return { route: "", description: "", run: "", stops: [] };
 }
@@ -149,6 +158,7 @@ export function TripApp() {
   const [stored, setStored] = useState(true);
   const saveRevision = useRef(0);
   const [status, setStatus] = useState("");
+  const [routeBuilding, setRouteBuilding] = useState(false);
   const [error, setError] = useState("");
   const [area, setArea] = useState("Wake County, North Carolina");
   const [text, setText] = useState("");
@@ -720,6 +730,7 @@ export function TripApp() {
       setError("Add at least one stop before building the route.");
       return;
     }
+    setRouteBuilding(true);
     setStatus("Building the route…");
     try {
       const data = mapData && loadedArea === area ? mapData : await cachedMap(current, area, setStatus);
@@ -745,6 +756,9 @@ export function TripApp() {
       setStatus("");
     } catch (err) {
       setError(err instanceof Error ? err.message : "The route could not be built.");
+      setStatus("");
+    } finally {
+      setRouteBuilding(false);
       setStatus("");
     }
   }
@@ -1593,14 +1607,15 @@ export function TripApp() {
           )}
           <div className="fixed inset-x-0 bottom-0 z-[1200] border-t border-[#dce3ec] bg-white p-3 shadow-[0_-8px_28px_rgba(24,39,62,0.12)]">
             <div className="mx-auto flex max-w-2xl flex-col gap-2">
-              {status && <p className="text-sm font-medium">{status}</p>}
+              {routeBuilding ? <RouteBuildStatus message={status} /> : status && <p className="text-sm font-medium">{status}</p>}
               {error && <p className="text-sm text-[#7f1d1d]">{error}</p>}
               <div className="flex gap-2">
                 <Button type="button" variant="outline" className="h-11 flex-1 rounded-xl border-[#dce3ec] bg-[#f8fafc] text-sm font-semibold" onClick={saveDraftAndBack}>
                   {reviewTrip ? "Back to trips" : draftActive && (sheet.stops.length > 0 || text.trim()) ? "Save draft & back" : "Back"}
                 </Button>
-                <Button type="button" className="h-11 flex-[2] rounded-xl bg-[#173b64] text-sm font-bold text-white shadow-sm disabled:opacity-100" disabled={(!sheet.stops.length && !text.trim()) || !!status} onClick={() => void generate()}>
-                  {status ? "Building…" : "Build the route"}
+                <Button type="button" className="h-11 flex-[2] rounded-xl bg-[#173b64] text-sm font-bold text-white shadow-sm disabled:opacity-100" disabled={(!sheet.stops.length && !text.trim()) || routeBuilding || !!status} onClick={() => void generate()}>
+                  {routeBuilding && <LoaderCircle aria-hidden="true" className="mr-2 inline h-4 w-4 animate-spin" />}
+                  {routeBuilding ? "Building route…" : "Build the route"}
                 </Button>
               </div>
             </div>
@@ -1787,6 +1802,7 @@ export function TripApp() {
           )}
           <div className="fixed inset-x-0 bottom-0 z-[1200] border-t border-[#dce3ec] bg-white p-3 shadow-[0_-8px_28px_rgba(24,39,62,0.12)]">
             <div className="mx-auto flex max-w-2xl flex-col gap-2">
+              {routeBuilding && <RouteBuildStatus message={status} />}
               {tapMode !== null ? (
                 <Button
                   type="button"
@@ -1801,12 +1817,13 @@ export function TripApp() {
                   <Button
                     type="button"
                     className="h-11 rounded-xl bg-[#173b64] text-sm font-bold text-white shadow-sm"
+                    disabled={routeBuilding}
                     onClick={() => { setTapMode("via"); setMapFixContext(null); }}
                   >
                     Add a point on map
                   </Button>
                   {editingLockedRun && <p className="rounded-lg border border-[#246b36] bg-[#e8f3e8] p-2 text-sm text-[#173b22]">This GPX is locked. Your saved track stays safe; unlock it from today’s list before replacing it with this route.</p>}
-                  <Button type="button" className="h-11 rounded-xl bg-[#173b64] text-sm font-bold text-white shadow-sm" disabled={!!status || editingLockedRun || (route.warnings.some((w) => w.level === "warn") && !warningAcknowledged)} onClick={saveToDay}>
+                  <Button type="button" className="h-11 rounded-xl bg-[#173b64] text-sm font-bold text-white shadow-sm" disabled={routeBuilding || !!status || editingLockedRun || (route.warnings.some((w) => w.level === "warn") && !warningAcknowledged)} onClick={saveToDay}>
                     {editingLockedRun ? "Unlock GPX to replace it" : "Add to today’s list"}
                   </Button>
                   <div className="grid grid-cols-2 gap-2">
@@ -1817,7 +1834,7 @@ export function TripApp() {
                       type="button"
                       variant="outline"
                       className="h-12"
-                      disabled={!!status || (route.warnings.some((w) => w.level === "warn") && !warningAcknowledged)}
+                      disabled={routeBuilding || !!status || (route.warnings.some((w) => w.level === "warn") && !warningAcknowledged)}
                       onClick={() =>
                         downloadBlob(
                           runFileName(0, {
