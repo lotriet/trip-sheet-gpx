@@ -1458,7 +1458,7 @@ export function TripApp() {
                           : null;
                         const nearbyTargetRoad = targetRoad && targetRoad.distance <= 0.015 ? targetRoad : null;
                         return (
-                          <li key={mi} className="grid grid-cols-[10.5rem_1.75rem_1.9rem] items-center gap-1 rounded-lg border border-[#e1e7ef] bg-white p-1.5 shadow-[0_1px_2px_rgba(24,39,62,0.04)] sm:grid-cols-[10.5rem_minmax(0,1fr)_1.75rem_1.9rem]">
+                          <li key={mi} className="grid grid-cols-[9rem_1.75rem_1.9rem] items-center gap-1 rounded-lg border border-[#e1e7ef] bg-white p-1.5 shadow-[0_1px_2px_rgba(24,39,62,0.04)] sm:grid-cols-[9rem_minmax(0,1fr)_1.75rem_1.9rem]">
                               <div className="flex h-8 min-w-0 items-center rounded-md border border-[#cbd5e1] bg-[#f8fafc] pl-2 focus-within:ring-2 focus-within:ring-[#9bb4ff]">
                                 <ManeuverArrow kind={m.kind} />
                                 <select
