@@ -1448,7 +1448,7 @@ export function TripApp() {
                         return (
                           <li key={mi} className="grid grid-cols-[minmax(0,1fr)_1.75rem_1.9rem] items-center gap-1 rounded-lg border border-[#e1e7ef] bg-white p-1.5 shadow-[0_1px_2px_rgba(24,39,62,0.04)] sm:grid-cols-[minmax(0,0.85fr)_minmax(0,1fr)_1.75rem_1.9rem]">
                               <select
-                                className="h-9 min-w-0 rounded-md border border-[#cbd5e1] bg-[#f8fafc] px-1.5 text-sm font-medium text-[#17243a]"
+                                className="h-8 min-w-0 rounded-md border border-[#cbd5e1] bg-[#f8fafc] px-1.5 text-[13px] font-medium leading-tight text-[#17243a]"
                                 value={m.kind}
                                 aria-label="Direction"
                                 onChange={(e) => updateManeuver(si, mi, { kind: e.target.value as ManeuverKind })}
@@ -1460,7 +1460,7 @@ export function TripApp() {
                                 ))}
                               </select>
                               <WrapField
-                                className="col-span-3 row-start-2 min-h-9 px-2 py-1 text-sm sm:col-span-1 sm:row-auto sm:text-sm"
+                                className="col-span-3 row-start-2 min-h-8 px-2 py-1 text-[13px] leading-tight sm:col-span-1 sm:row-auto"
                                 value={m.street}
                                 label="Street"
                                 placeholder="Street name"
