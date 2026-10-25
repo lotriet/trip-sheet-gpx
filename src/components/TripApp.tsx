@@ -959,13 +959,20 @@ export function TripApp() {
     () => route?.stops.map((s) => ({ lat: s.lat, lon: s.lon, label: `${s.time} ${s.description}` })) ?? [],
     [route],
   );
+  const screenTitle = view === "day"
+    ? "Today’s runs"
+    : view === "review"
+      ? "Review trip sheets"
+      : view === "edit"
+        ? (sheet.route || sheet.run ? `Edit ${[sheet.route, sheet.run].filter(Boolean).join(" ")}` : "Build a route")
+        : "Check your route";
 
   if (!ready) {
     return (
-      <main className="mx-auto flex min-h-dvh w-full max-w-lg flex-col bg-[#f6f3ea] text-[#142033]">
-        <header className="border-b border-[#d9d2c3] bg-[#0f2744] px-4 py-4 text-white">
-          <p className="text-xs font-semibold tracking-wide text-[#f5c451]">WCPSS trip sheets</p>
-          <h1 className="text-2xl font-semibold leading-tight">Streets into an OsmAnd track</h1>
+      <main className="mx-auto flex min-h-dvh w-full max-w-2xl flex-col bg-[#f3f5f8] text-[#17243a]">
+        <header className="border-b border-[#d9e0ea] bg-[#10233f] px-4 py-3 text-white shadow-sm">
+          <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#eec85c]">Trip Sheet GPX</p>
+          <h1 className="mt-0.5 text-xl font-semibold leading-tight">Opening today’s runs</h1>
         </header>
         <section className="m-4 rounded-xl bg-white p-4 ring-1 ring-[#d9d2c3]" aria-live="polite">
           {loadError ? (
@@ -983,38 +990,41 @@ export function TripApp() {
   }
 
   return (
-    <main className="mx-auto flex min-h-dvh w-full max-w-lg flex-col bg-[#f6f3ea] text-[#142033]">
-      <header className="border-b border-[#d9d2c3] bg-[#0f2744] px-4 py-4 text-white">
-        <p className="text-xs font-semibold tracking-wide text-[#f5c451]">WCPSS trip sheets</p>
-        <h1 className="text-2xl font-semibold leading-tight">Streets into an OsmAnd track</h1>
-        <p className="mt-1 text-sm text-[#d6deea]">
-          Photos and saved runs stay on this phone. Route lookup sends street names and approximate locations to public map and routing services; building a route needs internet. Downloaded GPX files work offline. Check the track against the trip sheet, one-way signs, and bus restrictions before driving.
-          {stored ? "" : " The day could not be saved; changes may be lost when you leave."}
-        </p>
-        {offerHomeScreenInstall && (
-          <div className="mt-3">
-            <button
-              type="button"
-              className="rounded-lg border border-white/50 px-3 py-2 text-sm font-medium text-white underline underline-offset-2"
-              onClick={() => setShowInstallHelp((open) => !open)}
-              aria-expanded={showInstallHelp}
-            >
-              {showInstallHelp ? "Hide install steps" : "Add this app to your Home Screen"}
-            </button>
-            {showInstallHelp && (
-              <div className="mt-2 rounded-lg bg-white p-3 text-sm leading-relaxed text-[#142033]">
-                <p className="font-semibold">Install on your iPhone</p>
-                <ol className="mt-1 list-decimal space-y-1 pl-5">
-                  <li>Open this page in Safari.</li>
-                  <li>Tap Safari’s Share button (the square with the up arrow).</li>
-                  <li>Scroll down and tap <strong>Add to Home Screen</strong>, then tap <strong>Add</strong>.</li>
-                </ol>
-                <p className="mt-2 text-xs">Your saved trip sheets stay on this phone. The app still needs internet to build routes.</p>
+    <main className="mx-auto flex min-h-dvh w-full max-w-2xl flex-col bg-[#f3f5f8] text-[#17243a]">
+      <header className="border-b border-[#d9e0ea] bg-[#10233f] px-4 py-3 text-white shadow-sm">
+        <div className="flex items-center justify-between gap-3">
+          <div className="min-w-0">
+            <p className="text-[0.68rem] font-bold uppercase tracking-[0.16em] text-[#eec85c]">Trip Sheet GPX</p>
+            <h1 className="mt-0.5 truncate text-xl font-semibold leading-tight">{screenTitle}</h1>
+          </div>
+          {view === "day" && runs.length > 0 && (
+            <span className="shrink-0 rounded-full border border-white/20 bg-white/10 px-3 py-1 text-xs font-semibold text-white">{runs.length} {runs.length === 1 ? "run" : "runs"}</span>
+          )}
+        </div>
+        <details className="mt-2 text-xs text-[#d6deea]">
+          <summary className="w-fit cursor-pointer select-none rounded-md px-1 py-0.5 hover:bg-white/10">Privacy, route safety & app info</summary>
+          <div className="mt-2 space-y-2 rounded-lg bg-white/10 p-3 leading-relaxed">
+            <p>Photos and saved runs stay on this phone. Route lookup sends street names and approximate locations to public map and routing services. Building a route needs internet; downloaded GPX files work offline.</p>
+            <p>Check the track against the trip sheet, one-way signs, and bus restrictions before driving.</p>
+            {offerHomeScreenInstall && (
+              <div>
+                <button type="button" className="font-semibold text-white underline underline-offset-2" onClick={() => setShowInstallHelp((open) => !open)} aria-expanded={showInstallHelp}>
+                  {showInstallHelp ? "Hide iPhone install steps" : "Add to iPhone Home Screen"}
+                </button>
+                {showInstallHelp && (
+                  <ol className="mt-2 list-decimal space-y-1 pl-5">
+                    <li>Open this page in Safari.</li>
+                    <li>Tap Safari’s Share button.</li>
+                    <li>Choose <strong>Add to Home Screen</strong>, then tap <strong>Add</strong>.</li>
+                  </ol>
+                )}
               </div>
             )}
           </div>
-        )}
+        </details>
       </header>
+
+      {!stored && <p className="bg-[#fff4d6] px-4 py-2 text-sm font-medium text-[#714b08]" role="alert">This phone couldn’t save the latest changes. Check storage before leaving this page.</p>}
 
       {status && <p className="bg-[#f5c451] px-4 py-2 text-sm font-medium text-[#142033]">{status}</p>}
       {error && (
@@ -1024,31 +1034,31 @@ export function TripApp() {
       )}
 
       {view === "day" && (
-        <section className="flex flex-1 flex-col gap-3 px-4 py-4 pb-48">
+        <section className="flex flex-1 flex-col gap-3 px-4 py-5 pb-48 sm:px-6">
           {!ready && <p className="text-sm">Opening today’s list…</p>}
           {ready && runs.length === 0 && (
-            <div className="rounded-xl bg-white p-4 ring-1 ring-[#d9d2c3]">
-              <p className="text-lg font-semibold">No runs yet today</p>
-              <ol className="mt-2 list-decimal space-y-1 pl-5 text-sm leading-relaxed">
-                <li>Photograph each trip sheet, choose a PDF, or paste the text.</li>
-                <li>Fix anything the reader got wrong.</li>
-                <li>Add the run to this list, in the order you drive them.</li>
-                <li>Download one track for the day, or a zip of separate tracks.</li>
-              </ol>
+            <div className="rounded-2xl border border-[#e1e6ed] bg-white p-5 shadow-sm">
+              <div className="mb-3 flex h-11 w-11 items-center justify-center rounded-xl bg-[#e8eff8] text-xl text-[#173b64]">＋</div>
+              <p className="text-lg font-bold tracking-tight">Start with a trip sheet</p>
+              <p className="mt-1 text-sm leading-relaxed text-[#586579]">Add photos, a PDF, or copied text. Check the stops and directions, then build a route you can save to OsmAnd.</p>
+              <Button type="button" className="mt-4 h-11 bg-[#173b64] px-4 text-white" onClick={openNew}>Add your first run</Button>
             </div>
           )}
           {runs.length > 0 && (
-            <div className="rounded-xl bg-white px-3 py-2 ring-1 ring-[#d9d2c3]">
-              <div className="flex items-center justify-between gap-3">
-                <p className="text-sm font-semibold">Today’s order · {runs.length} {runs.length === 1 ? "run" : "runs"}</p>
+            <div className="flex items-center justify-between gap-3 px-1 pb-1">
+              <div>
+                <p className="text-xs font-bold uppercase tracking-[0.12em] text-[#68758a]">Today’s route list</p>
+                <p className="text-lg font-bold tracking-tight">{runs.length} {runs.length === 1 ? "run" : "runs"} · {runs.reduce((sum, run) => sum + run.miles, 0).toFixed(1)} mi</p>
+              </div>
+              <div className="flex items-center gap-2">
                 {runs.some((run) => run.warnings.some((warning) => warning.level === "warn")) && (
                   <Button
                     type="button"
                     variant="outline"
-                    className="h-9 shrink-0 border-[#b91c1c] bg-[#fff7ed] px-3 text-sm text-[#7f1d1d]"
+                    className="h-9 shrink-0 border-[#e7b85b] bg-[#fff7e5] px-3 text-xs font-semibold text-[#77500a]"
                     onClick={() => document.querySelector<HTMLElement>("[data-warning-run]")?.scrollIntoView({ behavior: "smooth", block: "center" })}
                   >
-                    Jump to route check
+                    Check warnings
                   </Button>
                 )}
               </div>
@@ -1073,36 +1083,28 @@ export function TripApp() {
           )}
           {runs.map((run, i) => {
             const warnings = run.warnings.filter((w) => w.level === "warn");
-            return (
-            <article key={run.id} data-warning-run={warnings.length ? "true" : undefined} className="rounded-xl bg-white p-3 ring-1 ring-[#d9d2c3]">
-              <div className="flex items-start justify-between gap-2">
-                <div>
-                  <p className="text-xs font-semibold text-[#0f2744]">Run {i + 1}</p>
-                  {run.locked && <span className="mt-1 inline-flex rounded-full bg-[#e8f3e8] px-2 py-0.5 text-xs font-semibold text-[#246b36]">GPX locked</span>}
-                  <h2 className="text-lg font-semibold leading-tight">
-                    {run.route || "Route"} {run.run && <span className="text-base font-medium">{run.run}</span>}
-                  </h2>
-                  <p className="text-sm">{run.description || "Untitled sheet"}</p>
-                  <p className="text-sm text-[#3d4b63]">
-                    {run.firstTime} · {run.miles.toFixed(2)} mi
-                  </p>
+                return (
+            <article key={run.id} data-warning-run={warnings.length ? "true" : undefined} className="rounded-2xl border border-[#dce3ec] bg-white p-3.5 shadow-[0_4px_14px_rgba(24,39,62,0.07)] transition-shadow hover:shadow-[0_7px_20px_rgba(24,39,62,0.1)]">
+              <div className="flex items-start gap-3">
+                <div className="flex shrink-0 flex-col items-center gap-1">
+                  <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-[#173b64] text-sm font-bold text-white">{i + 1}</span>
+                  <button type="button" className="h-7 w-8 rounded-md text-xs font-semibold text-[#53627a] hover:bg-[#eef2f7] disabled:opacity-30" onClick={() => move(i, -1)} disabled={exportingDay || i === 0} aria-label={`Move run ${i + 1} earlier`} title="Move earlier">↑</button>
+                  <button type="button" className="h-7 w-8 rounded-md text-xs font-semibold text-[#53627a] hover:bg-[#eef2f7] disabled:opacity-30" onClick={() => move(i, 1)} disabled={exportingDay || i === runs.length - 1} aria-label={`Move run ${i + 1} later`} title="Move later">↓</button>
                 </div>
-                <div className="flex flex-col gap-1">
-                  <Button type="button" variant="outline" className="h-10 px-3" onClick={() => move(i, -1)} disabled={exportingDay || i === 0} aria-label={`Move run ${i + 1} earlier`}>
-                    Earlier
-                  </Button>
-                  <Button type="button" variant="outline" className="h-10 px-3" onClick={() => move(i, 1)} disabled={exportingDay || i === runs.length - 1} aria-label={`Move run ${i + 1} later`}>
-                    Later
-                  </Button>
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <h2 className="text-lg font-bold leading-tight tracking-tight">{run.route || "Route"} {run.run && <span className="font-semibold text-[#53627a]">{run.run}</span>}</h2>
+                    {run.locked && <span className="rounded-full bg-[#e7f3eb] px-2 py-0.5 text-[0.68rem] font-bold text-[#216338]">Protected</span>}
+                    {!warnings.length && <span className="rounded-full bg-[#e7f3eb] px-2 py-0.5 text-[0.68rem] font-bold text-[#216338]">Ready to review</span>}
+                  </div>
+                  <p className="mt-0.5 truncate text-sm font-medium text-[#46546a]">{run.description || "Untitled sheet"}</p>
+                  <p className="mt-1 text-xs font-medium text-[#68758a]">{run.firstTime} <span className="px-1 text-[#a5afbd]">·</span> {run.miles.toFixed(2)} miles</p>
                 </div>
               </div>
               {warnings.length > 0 && (
-                <div className="mt-3 rounded-lg border-2 border-[#b91c1c] bg-[#fff7ed] p-3" role="alert">
-                  <p className="text-sm font-bold">Route needs review · {warnings.length} warning{warnings.length === 1 ? "" : "s"}</p>
-                  <p className="mt-1 text-sm">{warnings[0].message}</p>
-                  <p className="mt-2 text-sm leading-relaxed">
-                    If the trip sheet is wrong, choose <strong>Edit direction</strong>. If the sheet is right but the route misses the road, choose <strong>Guide on map</strong> and tap the road the bus uses.
-                  </p>
+                <div className="mt-3 rounded-xl border border-[#f0d28d] border-l-4 border-l-[#d28b16] bg-[#fff9ea] p-3" role="alert">
+                  <p className="text-xs font-bold uppercase tracking-wide text-[#80540b]">Needs a quick check · {warnings.length} {warnings.length === 1 ? "issue" : "issues"}</p>
+                  <p className="mt-1 text-sm leading-relaxed text-[#463716]">{warnings[0].message}</p>
                   {warnings.length > 1 && (
                     <details className="mt-1 text-sm">
                       <summary className="cursor-pointer font-medium">Show {warnings.length - 1} more</summary>
@@ -1111,7 +1113,7 @@ export function TripApp() {
                       </ul>
                     </details>
                   )}
-                  <Button type="button" variant="outline" className="mt-2 h-10 bg-white" onClick={() => openEdit(run)} disabled={exportingDay}>Review and fix route</Button>
+                  <Button type="button" variant="outline" className="mt-2 h-9 border-[#e5c981] bg-white px-3 text-sm font-semibold text-[#68470b]" onClick={() => openEdit(run)} disabled={exportingDay}>Review this route</Button>
                 </div>
               )}
               {(run.vias?.length ?? 0) > 0 && (
@@ -1130,36 +1132,41 @@ export function TripApp() {
                   <p className="mt-1 text-sm text-[#3d4b63]">Blue dots are via points. The dark line bends through each one, then returns to the printed streets.</p>
                 </div>
               )}
-              <div className="mt-2 grid grid-cols-2 gap-2">
-                <Button type="button" variant="outline" className="h-10" onClick={() => setMapRun(mapRun === run.id ? null : run.id)} disabled={run.coords.length < 2}>
+              <div className="mt-3 grid grid-cols-3 gap-1.5 border-t border-[#edf0f4] pt-2.5">
+                <Button type="button" variant="outline" className="h-9 border-[#dce3ed] bg-[#f8fafc] text-xs font-semibold text-[#34445c]" onClick={() => setMapRun(mapRun === run.id ? null : run.id)} disabled={run.coords.length < 2}>
                   {mapRun === run.id ? "Hide map" : "Map"}
                 </Button>
-                <Button type="button" variant="outline" className="h-10" onClick={() => openEdit(run)} disabled={exportingDay}>
+                <Button type="button" variant="outline" className="h-9 border-[#dce3ed] bg-[#f8fafc] text-xs font-semibold text-[#34445c]" onClick={() => openEdit(run)} disabled={exportingDay}>
                   Edit
                 </Button>
-                <Button type="button" variant="outline" className="h-10" onClick={() => downloadBlob(runFileName(i, run), new Blob([run.gpx], { type: "application/octet-stream" }))}>
-                  This GPX
-                </Button>
-                <Button type="button" variant="outline" className={`col-span-2 h-10 ${run.locked ? "border-[#246b36] bg-[#e8f3e8] text-[#246b36]" : ""}`} onClick={() => toggleRunLock(run.id)} disabled={exportingDay} aria-pressed={!!run.locked}>
-                  {run.locked ? "Unlock GPX to edit or remove" : "Lock this GPX"}
-                </Button>
-                <Button type="button" variant="destructive" className="col-span-2 h-10" onClick={() => removeRun(run)} disabled={exportingDay || !!run.locked}>
-                  {run.locked ? "Locked · cannot remove" : "Remove"}
+                <Button type="button" variant="outline" className="h-9 border-[#dce3ed] bg-[#f8fafc] text-xs font-semibold text-[#34445c]" onClick={() => downloadBlob(runFileName(i, run), new Blob([run.gpx], { type: "application/octet-stream" }))}>
+                  Download
                 </Button>
               </div>
+              <details className="mt-2 border-t border-[#edf0f4] pt-2">
+                <summary className="w-fit cursor-pointer select-none text-xs font-semibold text-[#68758a]">More options</summary>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  <Button type="button" variant="outline" className={`h-8 px-2.5 text-xs ${run.locked ? "border-[#abd0b5] bg-[#f0f8f2] text-[#216338]" : "border-[#dce3ed] bg-white text-[#34445c]"}`} onClick={() => toggleRunLock(run.id)} disabled={exportingDay} aria-pressed={!!run.locked}>
+                    {run.locked ? "Unlock GPX" : "Protect GPX"}
+                  </Button>
+                  <Button type="button" variant="destructive" className="h-8 px-2.5 text-xs" onClick={() => removeRun(run)} disabled={exportingDay || !!run.locked}>
+                    {run.locked ? "Protected from removal" : "Remove run"}
+                  </Button>
+                </div>
+              </details>
             </article>
             );
           })}
-          <div className="fixed inset-x-0 bottom-0 border-t border-[#d9d2c3] bg-[#f6f3ea] p-3">
-            <div className="mx-auto flex max-w-lg flex-col gap-2">
-              <Button type="button" className="h-12 bg-[#0f2744] text-base text-white" onClick={openNew} disabled={exportingDay}>
+          <div className="fixed inset-x-0 bottom-0 z-30 border-t border-[#dce3ec] bg-white/95 p-3 shadow-[0_-8px_28px_rgba(24,39,62,0.09)] backdrop-blur-md">
+            <div className="mx-auto flex max-w-2xl flex-col gap-2">
+              <Button type="button" className="h-11 rounded-xl bg-[#173b64] text-sm font-bold text-white shadow-sm" onClick={openNew} disabled={exportingDay}>
                 Add a run
               </Button>
               <div className="grid grid-cols-2 gap-2">
-                <Button type="button" variant="outline" className="h-12 text-sm" disabled={!runs.length || exportingDay} onClick={() => void exportDay()}>
+                <Button type="button" variant="outline" className="h-10 rounded-xl border-[#dce3ec] bg-[#f8fafc] text-xs font-semibold" disabled={!runs.length || exportingDay} onClick={() => void exportDay()}>
                   {exportingDay ? "Preparing day GPX…" : "One GPX for the day"}
                 </Button>
-                <Button type="button" variant="outline" className="h-12 text-sm" disabled={!runs.length || exportingDay} onClick={() => void shareAll()}>
+                <Button type="button" variant="outline" className="h-10 rounded-xl border-[#dce3ec] bg-[#f8fafc] text-xs font-semibold" disabled={!runs.length || exportingDay} onClick={() => void shareAll()}>
                   {canShare ? "Share all" : "Download all"}
                 </Button>
               </div>
@@ -1170,12 +1177,13 @@ export function TripApp() {
       )}
 
       {view === "review" && (
-        <section className="flex flex-col gap-3 px-4 py-4 pb-36">
-          <p className="text-lg font-semibold">
-            {trips.length} trips found. Check them, then build.
-          </p>
-          <p className="-mt-2 text-sm text-[#3d4b63]">Tap a trip to see its stops and directions.</p>
-          <ul className="space-y-2">
+        <section className="flex flex-col gap-3 px-4 py-5 pb-36 sm:px-6">
+          <div className="rounded-2xl border border-[#dce3ec] bg-gradient-to-br from-white to-[#edf3fa] p-4 shadow-sm">
+            <p className="text-[0.68rem] font-bold uppercase tracking-[0.14em] text-[#718097]">Recognized trip sheets</p>
+            <p className="mt-1 text-xl font-bold tracking-tight">{trips.length} {trips.length === 1 ? "trip" : "trips"} found</p>
+            <p className="mt-1 text-sm text-[#586579]">Open each trip to check its stops and directions before building the route.</p>
+          </div>
+          <ul className="space-y-2.5">
             {trips.map((trip) => {
               const st = tripStates[trip.key];
               const edited = !!tripEdits[trip.key];
@@ -1186,7 +1194,7 @@ export function TripApp() {
                 <li key={trip.key} data-trip={trip.run || trip.key}>
                   <button
                     type="button"
-                    className="block w-full touch-manipulation rounded-xl bg-white p-3 text-left ring-1 ring-[#d9d2c3] active:bg-[#eef2f7]"
+                    className="block w-full touch-manipulation rounded-2xl border border-[#dce3ec] bg-white p-3.5 text-left shadow-[0_3px_12px_rgba(24,39,62,0.06)] transition-shadow active:bg-[#f5f8fc] active:shadow-sm"
                     onClick={() => openTrip(trip)}
                   >
                     <span className="flex items-baseline justify-between gap-2">
@@ -1248,7 +1256,7 @@ export function TripApp() {
               ))}
             </div>
           )}
-          <div className="fixed inset-x-0 bottom-0 border-t border-[#d9d2c3] bg-[#f6f3ea] p-3">
+          <div className="fixed inset-x-0 bottom-0 z-30 border-t border-[#dce3ec] bg-white/95 p-3 shadow-[0_-8px_28px_rgba(24,39,62,0.09)] backdrop-blur-md">
             <div className="mx-auto flex max-w-lg flex-col gap-2">
               {status && <p className="text-sm font-medium">{status}</p>}
               <div className="flex gap-2">
@@ -1271,7 +1279,18 @@ export function TripApp() {
       )}
 
       {view === "edit" && (
-        <section className="flex flex-col gap-1.5 px-3 py-2 pb-48">
+        <section className="flex flex-col gap-3 px-3 py-4 pb-48 sm:px-5">
+          {!reviewTrip && (
+            <div className="rounded-2xl border border-[#dce3ec] bg-gradient-to-br from-white via-white to-[#edf3fa] px-4 py-3 shadow-sm">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-[0.68rem] font-bold uppercase tracking-[0.14em] text-[#718097]">Trip sheet setup</p>
+                  <p className="mt-0.5 text-base font-bold text-[#17243a]">Add a sheet, then check the details</p>
+                </div>
+                {sheet.stops.length > 0 && <span className="rounded-full bg-[#173b64] px-2.5 py-1 text-xs font-bold text-white">{sheet.stops.length} stops</span>}
+              </div>
+            </div>
+          )}
           {reviewTrip && (
             <div className="rounded-xl bg-white p-3 ring-1 ring-[#d9d2c3]" data-trip-open={reviewTrip.run || reviewTrip.key}>
               <p className="text-lg font-semibold">
@@ -1373,7 +1392,7 @@ export function TripApp() {
                 const stopCheck = stopState(stop.description);
                 const sid = `stop-${si}`;
                 return (
-                  <div key={si} className="rounded-2xl bg-white p-2.5 shadow-[0_2px_8px_rgba(20,32,51,0.07)] ring-1 ring-[#d4ccbb]" data-stop={si}>
+                  <div key={si} className="rounded-2xl border border-[#dce3ec] border-l-[3px] border-l-[#315d8c] bg-white p-3 shadow-[0_3px_12px_rgba(24,39,62,0.06)]" data-stop={si}>
                     <div className="mb-2 flex items-center justify-between gap-2 border-b border-[#ece7dc] pb-1.5">
                       <p className="rounded-full bg-[#e9eff7] px-2.5 py-1 text-xs font-bold tracking-wide text-[#0f2744]">STOP {si + 1}</p>
                       <button
@@ -1416,7 +1435,7 @@ export function TripApp() {
                       <span className="text-[0.68rem] font-bold uppercase tracking-[0.12em] text-[#596579]">Directions</span>
                       <span className="h-px flex-1 bg-[#e3e8ef]" />
                     </div>
-                    <ul className="space-y-1.5">
+                    <ul className="space-y-2 rounded-xl bg-[#f4f7fb] p-2 ring-1 ring-inset ring-[#e7edf5]">
                       {stop.maneuvers.map((m, mi) => {
                         const st = streetState(m.street);
                         const mid = `${si}-${mi}`;
@@ -1427,9 +1446,9 @@ export function TripApp() {
                           : null;
                         const nearbyTargetRoad = targetRoad && targetRoad.distance <= 0.015 ? targetRoad : null;
                         return (
-                          <li key={mi} className="grid grid-cols-[minmax(0,0.85fr)_minmax(0,1fr)_2rem_2.25rem] items-center gap-1 rounded-xl bg-[#edf2f8] p-1.5 ring-1 ring-inset ring-[#dce4ee]">
+                          <li key={mi} className="grid grid-cols-[minmax(0,1fr)_2rem_2.25rem] items-center gap-1.5 rounded-xl border border-[#e1e7ef] bg-white p-2 shadow-[0_1px_2px_rgba(24,39,62,0.04)] sm:grid-cols-[minmax(0,0.85fr)_minmax(0,1fr)_2rem_2.25rem]">
                               <select
-                                className="h-9 min-w-0 rounded-lg border border-[#cbd5e1] bg-white px-1.5 text-sm text-[#17243a]"
+                                className="h-10 min-w-0 rounded-lg border border-[#cbd5e1] bg-[#f8fafc] px-2 text-sm font-medium text-[#17243a]"
                                 value={m.kind}
                                 aria-label="Direction"
                                 onChange={(e) => updateManeuver(si, mi, { kind: e.target.value as ManeuverKind })}
@@ -1441,25 +1460,27 @@ export function TripApp() {
                                 ))}
                               </select>
                               <WrapField
-                                className="min-h-9 px-2 py-1 text-base"
+                                className="col-span-3 row-start-2 min-h-10 px-2 py-1 text-sm sm:col-span-1 sm:row-auto sm:text-base"
                                 value={m.street}
                                 label="Street"
                                 placeholder="Street name"
                                 onChange={(street) => updateManeuver(si, mi, { street })}
                                 onBlur={() => void recheckSoon()}
                               />
-                              <StreetMark state={st.state} open={suggestFor === mid} onTap={() => void tapMark(mid, st.state === "found" ? [] : [m.street])} />
+                              <div className="col-start-2 row-start-1 sm:col-auto sm:row-auto">
+                                <StreetMark state={st.state} open={suggestFor === mid} onTap={() => void tapMark(mid, st.state === "found" ? [] : [m.street])} />
+                              </div>
                               <button
                                 type="button"
-                                className="h-9 w-9 touch-manipulation rounded-lg border border-[#edd5d2] bg-white text-sm text-[#8f2c1c]"
+                                className="col-start-3 row-start-1 h-10 w-10 touch-manipulation rounded-lg border border-[#edd5d2] bg-white text-sm text-[#8f2c1c] sm:col-auto sm:row-auto"
                                 aria-label="Delete this direction"
                                 onClick={() => setSheet({ ...sheet, stops: sheet.stops.map((s, i) => (i === si ? { ...s, maneuvers: s.maneuvers.filter((_, j) => j !== mi) } : s)) })}
                               >
                                 ✕
                               </button>
-                            {st.label && <p className="col-span-4 px-1 text-[0.7rem] leading-tight text-[#15803d]">On the map: {st.label}</p>}
+                            {st.label && <p className="col-span-3 px-1 text-[0.7rem] leading-tight text-[#15803d] sm:col-span-4">On the map: {st.label}</p>}
                             {editWarnings.filter((w) => w.stopIndex === si && w.maneuverIndex === mi).map((w, wi) => (
-                              <div key={`route-warning-${wi}`} className="col-span-4 rounded-md border border-[#f0c36d] bg-[#ffedd5] p-2 text-sm text-[#7f1d1d]">
+                              <div key={`route-warning-${wi}`} className="col-span-3 rounded-lg border border-[#f0c36d] bg-[#fff6e5] p-2.5 text-sm text-[#7f1d1d] sm:col-span-4">
                                 <p role="alert">Route warning: {w.message}</p>
                                 {editingRun && editingRun.coords.length > 1 && (
                                   <>
@@ -1555,15 +1576,15 @@ export function TripApp() {
               </div>
             </div>
           )}
-          <div className="fixed inset-x-0 bottom-0 border-t border-[#d9d2c3] bg-[#f6f3ea] p-3">
-            <div className="mx-auto flex max-w-lg flex-col gap-2">
+          <div className="fixed inset-x-0 bottom-0 z-30 border-t border-[#dce3ec] bg-white/95 p-3 shadow-[0_-8px_28px_rgba(24,39,62,0.09)] backdrop-blur-md">
+            <div className="mx-auto flex max-w-2xl flex-col gap-2">
               {status && <p className="text-sm font-medium">{status}</p>}
               {error && <p className="text-sm text-[#7f1d1d]">{error}</p>}
               <div className="flex gap-2">
-                <Button type="button" variant="outline" className="h-12 flex-1" onClick={saveDraftAndBack}>
+                <Button type="button" variant="outline" className="h-11 flex-1 rounded-xl border-[#dce3ec] bg-[#f8fafc] text-sm font-semibold" onClick={saveDraftAndBack}>
                   {reviewTrip ? "Back to trips" : draftActive && (sheet.stops.length > 0 || text.trim()) ? "Save draft & back" : "Back"}
                 </Button>
-                <Button type="button" className="h-12 flex-[2] bg-[#0f2744] text-base text-white disabled:opacity-100" disabled={(!sheet.stops.length && !text.trim()) || !!status} onClick={() => void generate()}>
+                <Button type="button" className="h-11 flex-[2] rounded-xl bg-[#173b64] text-sm font-bold text-white shadow-sm disabled:opacity-100" disabled={(!sheet.stops.length && !text.trim()) || !!status} onClick={() => void generate()}>
                   {status ? "Building…" : "Build the route"}
                 </Button>
               </div>
@@ -1573,11 +1594,15 @@ export function TripApp() {
       )}
 
       {view === "preview" && route && (
-        <section className="flex flex-col gap-3 px-4 py-4 pb-56">
-          <p className="text-lg font-semibold">
-            {route.miles.toFixed(2)} miles · {sheet.route} {sheet.run}
-          </p>
-          <p className="rounded-lg bg-[#ffedd5] px-3 py-2 text-sm text-[#142033]">
+        <section className="flex flex-col gap-3 px-3 py-4 pb-60 sm:px-5">
+          <div className="flex items-end justify-between gap-3 rounded-2xl border border-[#dce3ec] bg-gradient-to-br from-white to-[#edf3fa] px-4 py-3 shadow-sm">
+            <div className="min-w-0">
+              <p className="text-[0.68rem] font-bold uppercase tracking-[0.14em] text-[#718097]">Route preview</p>
+              <p className="mt-0.5 truncate text-lg font-bold tracking-tight">{sheet.route} {sheet.run}</p>
+            </div>
+            <span className="shrink-0 rounded-xl bg-[#173b64] px-3 py-2 text-sm font-bold text-white">{route.miles.toFixed(2)} mi</span>
+          </div>
+          <p className="rounded-xl border border-[#f0d28d] bg-[#fff9ea] px-3 py-2.5 text-sm leading-relaxed text-[#463716]">
             Check this track before driving. One-way directions and bus restrictions may be missing from map data; turnaround points are estimates. Follow the trip sheet and road signs.
           </p>
           {renderWarnings()}
@@ -1592,7 +1617,7 @@ export function TripApp() {
               <span>I checked each warning against the trip sheet and road layout.</span>
             </label>
           )}
-          <div className="relative" data-route-map>
+          <div className="relative overflow-hidden rounded-2xl border border-[#dce3ec] bg-white p-1.5 shadow-[0_5px_18px_rgba(24,39,62,0.1)]" data-route-map>
             <RouteMap
               coords={route.coords}
               stops={previewStops}
@@ -1629,9 +1654,9 @@ export function TripApp() {
               </div>
             )}
           </div>
-          <details open className="rounded-lg bg-white p-3 ring-1 ring-[#d9d2c3]">
-            <summary className="cursor-pointer text-base font-semibold">Stops and turns · {sheet.stops.length}</summary>
-            <ol className="mt-2 space-y-2">
+          <details open className="rounded-2xl border border-[#dce3ec] bg-white p-3 shadow-sm">
+            <summary className="cursor-pointer text-sm font-bold">Stops and turns <span className="ml-1 rounded-full bg-[#edf3fa] px-2 py-0.5 text-xs text-[#315d8c]">{sheet.stops.length}</span></summary>
+            <ol className="mt-3 space-y-2.5">
               {sheet.stops.map((stop, i) => {
                 const warning = route.warnings.some((w) => w.level === "warn" && w.stopIndex === i);
                 const directions = stop.maneuvers
@@ -1643,7 +1668,7 @@ export function TripApp() {
                   : undefined;
                 const editingStop = warningFix?.stopIndex === i;
                 return (
-                  <li key={`${stop.time}-${i}`} data-stop-row={i} className={`rounded-md p-2 text-sm ${warning ? "bg-[#fff7ed] ring-2 ring-[#b91c1c]" : "bg-[#f6f3ea]"}`}>
+                  <li key={`${stop.time}-${i}`} data-stop-row={i} className={`rounded-xl border p-2.5 text-sm ${warning ? "border-[#e9ad66] bg-[#fff8ec] shadow-[0_2px_8px_rgba(178,105,13,0.08)]" : "border-[#e8edf3] bg-[#f7f9fc]"}`}>
                     <div className="flex gap-2">
                       <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[#0f2744] text-xs font-bold text-white">{i + 1}</span>
                       <span className="min-w-0">
@@ -1745,8 +1770,8 @@ export function TripApp() {
               ))}
             </ul>
           )}
-          <div className="fixed inset-x-0 bottom-0 z-30 border-t border-[#d9d2c3] bg-[#f6f3ea] p-3">
-            <div className="mx-auto flex max-w-lg flex-col gap-2">
+          <div className="fixed inset-x-0 bottom-0 z-30 border-t border-[#dce3ec] bg-white/95 p-3 shadow-[0_-8px_28px_rgba(24,39,62,0.09)] backdrop-blur-md">
+            <div className="mx-auto flex max-w-2xl flex-col gap-2">
               {tapMode !== null ? (
                 <Button
                   type="button"
@@ -1760,13 +1785,13 @@ export function TripApp() {
                 <>
                   <Button
                     type="button"
-                    className="h-12 bg-[#0f2744] text-base text-white"
+                    className="h-11 rounded-xl bg-[#173b64] text-sm font-bold text-white shadow-sm"
                     onClick={() => { setTapMode("via"); setMapFixContext(null); }}
                   >
                     Add a point on map
                   </Button>
                   {editingLockedRun && <p className="rounded-lg border border-[#246b36] bg-[#e8f3e8] p-2 text-sm text-[#173b22]">This GPX is locked. Your saved track stays safe; unlock it from today’s list before replacing it with this route.</p>}
-                  <Button type="button" className="h-12 bg-[#0f2744] text-base text-white" disabled={!!status || editingLockedRun || (route.warnings.some((w) => w.level === "warn") && !warningAcknowledged)} onClick={saveToDay}>
+                  <Button type="button" className="h-11 rounded-xl bg-[#173b64] text-sm font-bold text-white shadow-sm" disabled={!!status || editingLockedRun || (route.warnings.some((w) => w.level === "warn") && !warningAcknowledged)} onClick={saveToDay}>
                     {editingLockedRun ? "Unlock GPX to replace it" : "Add to today’s list"}
                   </Button>
                   <div className="grid grid-cols-2 gap-2">
