@@ -940,6 +940,9 @@ export function TripApp() {
                 <div className="mt-3 rounded-lg border-2 border-[#b91c1c] bg-[#fff7ed] p-3" role="alert">
                   <p className="text-sm font-bold">Route needs review · {warnings.length} warning{warnings.length === 1 ? "" : "s"}</p>
                   <p className="mt-1 text-sm">{warnings[0].message}</p>
+                  <p className="mt-2 text-sm leading-relaxed">
+                    If the trip sheet is wrong, choose <strong>Edit direction</strong>. If the sheet is right but the route misses the road, choose <strong>Guide on map</strong> and tap the road the bus uses.
+                  </p>
                   {warnings.length > 1 && (
                     <details className="mt-1 text-sm">
                       <summary className="cursor-pointer font-medium">Show {warnings.length - 1} more</summary>
@@ -1430,14 +1433,20 @@ export function TripApp() {
                       </span>
                     </div>
                     {warning && stopWarning && (
-                      <div className="mt-2 flex flex-wrap gap-2">
-                        {warningManeuver && <Button type="button" variant="outline" className="h-10 bg-white" onClick={() => editWarning(i, stopWarning.maneuverIndex)}>Edit direction</Button>}
-                        <Button type="button" variant="outline" className="h-10 bg-white" onClick={() => focusWarning(i, stopWarning.message, warningManeuver?.street)}>Guide on map</Button>
+                      <div className="mt-2">
+                        <div className="flex flex-wrap gap-2">
+                          {warningManeuver && <Button type="button" variant="outline" className="h-10 bg-white" onClick={() => editWarning(i, stopWarning.maneuverIndex)}>Edit direction</Button>}
+                          <Button type="button" variant="outline" className="h-10 bg-white" onClick={() => focusWarning(i, stopWarning.message, warningManeuver?.street)}>Guide on map</Button>
+                        </div>
+                        <p className="mt-2 text-xs leading-relaxed text-[#3d4b63]">Edit the direction if it differs from the trip sheet. If the sheet is right, guide the route on the map instead.</p>
                       </div>
                     )}
                     {editingStop && warningFix && (
                       <div className="mt-3 space-y-2 rounded-md bg-white p-3 ring-1 ring-[#d9d2c3]">
-                        <p className="text-xs font-semibold">Edit this direction from the trip sheet:</p>
+                        <div>
+                          <p className="text-xs font-semibold">Correct the direction to match the printed trip sheet.</p>
+                          <p className="mt-1 text-xs leading-relaxed text-[#3d4b63]">If the printed direction is already right, cancel this edit and use Guide on map to move the route onto the correct road.</p>
+                        </div>
                         <select className="h-11 w-full rounded-md border border-[#d9d2c3] bg-white px-3 text-base" aria-label="Direction" value={warningFix.kind} onChange={(e) => setWarningFix({ ...warningFix, kind: e.target.value as ManeuverKind })}>
                           {KINDS.map((kind) => <option key={kind} value={kind}>{KIND_LABEL[kind]}</option>)}
                         </select>
