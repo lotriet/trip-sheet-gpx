@@ -183,6 +183,7 @@ export function TripApp() {
   const [mapRun, setMapRun] = useState<string | null>(null);
   const [directionMapStop, setDirectionMapStop] = useState<number | null>(null);
   const [warningAcknowledged, setWarningAcknowledged] = useState(false);
+  const [warningCursor, setWarningCursor] = useState(0);
   const [showInstallHelp, setShowInstallHelp] = useState(false);
   const offerHomeScreenInstall = useSyncExternalStore(noSubscribe, canOfferHomeScreenInstall, () => false);
   const [warningFix, setWarningFix] = useState<{
@@ -209,11 +210,22 @@ export function TripApp() {
     [mapData, loadedArea, area],
   );
   const hasStops = sheet.stops.length > 0;
+  const hasDraftContent = hasStops || text.trim().length > 0;
+  const currentDraft = drafts.find((draft) => draft.id === draftId && draft.editingId === editingId);
+  const draftIsSaved = !!currentDraft && currentDraft.text === text && currentDraft.area === area &&
+    JSON.stringify(currentDraft.sheet) === JSON.stringify(sheet) &&
+    JSON.stringify(currentDraft.overrides) === JSON.stringify(overrides) &&
+    JSON.stringify(currentDraft.warnings) === JSON.stringify(editWarnings);
   const editingRun = editingId ? runs.find((run) => run.id === editingId) : undefined;
   // Fresh lookups of names the loaded map doesn't have, keyed by the typed text.
   const [lookups, setLookups] = useState<Record<string, { state: "looking" | "found" | "none"; name?: string }>>({});
   const [recheckTick, setRecheckTick] = useState(0);
-  const [undo, setUndo] = useState<{ stop: Sheet["stops"][number]; at: number } | null>(null);
+  const [undo, setUndo] = useState<
+    | { type: "stop"; stop: Sheet["stops"][number]; at: number }
+    | { type: "direction"; stopIndex: number; maneuver: Maneuver; at: number; rebuild?: boolean }
+    | null
+  >(null);
+  const scrollRestoreRef = useRef<number | null>(null);
   const lookKey = (raw: string) => raw.trim().toLowerCase().replace(/\s+/g, " ");
   const runCenter = useMemo(() => {
     if (!mapData) return null;
@@ -310,22 +322,44 @@ export function TripApp() {
     const stop = sheet.stops[si];
     setSheet({ ...sheet, stops: sheet.stops.filter((_, i) => i !== si) });
     setSuggestFor(null);
-    setUndo({ stop, at: si });
+    setUndo({ type: "stop", stop, at: si });
+  }
+
+  function deleteManeuver(si: number, mi: number) {
+    const maneuver = sheet.stops[si]?.maneuvers[mi];
+    if (!maneuver) return;
+    setSheet({ ...sheet, stops: sheet.stops.map((stop, i) => i === si ? { ...stop, maneuvers: stop.maneuvers.filter((_, j) => j !== mi) } : stop) });
+    setSuggestFor(null);
+    setUndo({ type: "direction", stopIndex: si, maneuver, at: mi });
   }
 
   function undoDelete() {
     if (!undo) return;
-    const stops = sheet.stops.slice();
-    stops.splice(Math.min(undo.at, stops.length), 0, undo.stop);
-    setSheet({ ...sheet, stops });
+    if (undo.type === "stop") {
+      const stops = sheet.stops.slice();
+      stops.splice(Math.min(undo.at, stops.length), 0, undo.stop);
+      setSheet({ ...sheet, stops });
+    } else {
+      const stop = sheet.stops[undo.stopIndex];
+      if (stop) {
+        const maneuvers = stop.maneuvers.slice();
+        maneuvers.splice(Math.min(undo.at, maneuvers.length), 0, undo.maneuver);
+        const nextSheet = { ...sheet, stops: sheet.stops.map((item, i) => i === undo.stopIndex ? { ...item, maneuvers } : item) };
+        setSheet(nextSheet);
+        if (undo.rebuild) {
+          scrollRestoreRef.current = window.scrollY;
+          void generate(overrides, nextSheet);
+        }
+      }
+    }
     setUndo(null);
   }
 
   useEffect(() => {
-    if (!undo) return;
+    if (!undo || routeBuilding) return;
     const t = setTimeout(() => setUndo(null), 10000);
     return () => clearTimeout(t);
-  }, [undo]);
+  }, [undo, routeBuilding]);
 
   useEffect(() => {
     // After typing settles (or a field loses focus), look up names the map doesn't have.
@@ -430,6 +464,14 @@ export function TripApp() {
       if (revision === saveRevision.current) setStored(saved);
     });
   }, [runs, ready]);
+
+  useEffect(() => {
+    const top = scrollRestoreRef.current;
+    if (top === null || view !== "preview" || routeBuilding) return;
+    scrollRestoreRef.current = null;
+    const frame = requestAnimationFrame(() => window.scrollTo({ top, behavior: "auto" }));
+    return () => cancelAnimationFrame(frame);
+  }, [route, view, routeBuilding]);
 
   function openNew() {
     setEditingId(null);
@@ -730,6 +772,7 @@ export function TripApp() {
       setError("Add at least one stop before building the route.");
       return;
     }
+    setWarningCursor(0);
     setRouteBuilding(true);
     setStatus("Building the route…");
     try {
@@ -755,6 +798,7 @@ export function TripApp() {
       setView("preview");
       setStatus("");
     } catch (err) {
+      scrollRestoreRef.current = null;
       setError(err instanceof Error ? err.message : "The route could not be built.");
       setStatus("");
     } finally {
@@ -798,11 +842,14 @@ export function TripApp() {
     setWarningFix(null);
     setTapMode(null);
     setMapFixContext(null);
+    scrollRestoreRef.current = window.scrollY;
     void generate(overrides, nextSheet);
   }
 
   function deleteWarningDirection() {
     if (!warningFix) return;
+    const removed = sheet.stops[warningFix.stopIndex]?.maneuvers[warningFix.maneuverIndex];
+    if (!removed) return;
     const nextSheet: Sheet = {
       ...sheet,
       stops: sheet.stops.map((stop, si) => si !== warningFix.stopIndex ? stop : {
@@ -814,22 +861,49 @@ export function TripApp() {
     setWarningFix(null);
     setTapMode(null);
     setMapFixContext(null);
+    setUndo({ type: "direction", stopIndex: warningFix.stopIndex, maneuver: removed, at: warningFix.maneuverIndex, rebuild: true });
+    scrollRestoreRef.current = window.scrollY;
     void generate(overrides, nextSheet);
+  }
+
+  function renderUndoToast() {
+    if (!undo) return null;
+    const bottom = view === "preview" ? "bottom-[13rem]" : "bottom-20";
+    return (
+      <div className={`fixed inset-x-0 ${bottom} z-[1300] px-3`} role="status">
+        <div className="mx-auto flex max-w-2xl items-center justify-between gap-2 rounded-xl bg-[#142033] px-3 py-2 text-sm text-white shadow-lg">
+          <span>{undo.type === "stop" ? "Stop deleted." : "Direction deleted."}</span>
+          <button type="button" className="h-9 rounded-lg bg-[#f5c451] px-3 font-semibold text-[#142033]" onClick={undoDelete}>Undo</button>
+        </div>
+      </div>
+    );
   }
 
   function renderWarnings() {
     if (!route) return null;
+    const issueCount = route.warnings.filter((warning) => warning.level === "warn").length;
+    let issueIndex = 0;
     return (
       <section aria-label="Route issues" className="space-y-2">
-        {route.warnings.some((w) => w.level === "warn") && (
-          <p className="text-sm font-semibold">Fix a direction, or guide the route on the map:</p>
+        {issueCount > 0 && (
+          <div className="flex items-center justify-between gap-3 rounded-xl border border-[#f0d28d] bg-[#fff9ea] px-3 py-2">
+            <p className="text-sm font-semibold text-[#68470b]">{issueCount} {issueCount === 1 ? "issue" : "issues"} to review</p>
+            <Button type="button" variant="outline" className="h-8 shrink-0 border-[#e5c981] bg-white px-2.5 text-xs font-semibold text-[#68470b]" onClick={() => {
+              const target = warningCursor % issueCount;
+              document.querySelector<HTMLElement>(`[data-route-warning="${target}"]`)?.scrollIntoView({ behavior: "smooth", block: "center" });
+              setWarningCursor((current) => (current + 1) % issueCount);
+            }}>
+              Next issue {warningCursor % issueCount + 1}/{issueCount}
+            </Button>
+          </div>
         )}
         {route.warnings.map((w, i) => {
+          const warningIndex = w.level === "warn" ? issueIndex++ : undefined;
           const stop = route.stops.find((s) => s.index === w.stopIndex);
           const destinationWarning = w.message.startsWith("Couldn't reach the last stop");
           const maneuver = destinationWarning ? undefined : sheet.stops[w.stopIndex]?.maneuvers[w.maneuverIndex];
           return (
-            <div key={`${i}-${w.stopIndex}-${w.maneuverIndex}`} className={`rounded-lg p-3 text-sm ${w.level === "warn" ? "bg-[#ffedd5]" : "bg-white ring-1 ring-[#d9d2c3]"}`}>
+            <div key={`${i}-${w.stopIndex}-${w.maneuverIndex}`} data-route-warning={warningIndex} className={`rounded-lg p-3 text-sm ${w.level === "warn" ? "bg-[#ffedd5]" : "bg-white ring-1 ring-[#d9d2c3]"}`}>
               <p>{w.message}</p>
               {w.level === "warn" && (
                 <div className="mt-2 flex flex-wrap gap-2">
@@ -850,6 +924,7 @@ export function TripApp() {
       const next = { ...overrides, turnarounds: { ...overrides.turnarounds, [pick]: { lat, lon } } };
       setTapMode(null);
       setPick(null);
+      scrollRestoreRef.current = window.scrollY;
       void generate(next);
       return;
     }
@@ -859,6 +934,7 @@ export function TripApp() {
       setOverrides(next);
       setTapMode(null);
       setMapFixContext(null);
+      scrollRestoreRef.current = window.scrollY;
       void generate(next);
     }
   }
@@ -1313,7 +1389,14 @@ export function TripApp() {
                   <p className="text-[0.68rem] font-bold uppercase tracking-[0.14em] text-[#718097]">Trip sheet setup</p>
                   <p className="mt-0.5 text-base font-bold text-[#17243a]">Add a sheet, then check the details</p>
                 </div>
-                {sheet.stops.length > 0 && <span className="rounded-full bg-[#173b64] px-2.5 py-1 text-xs font-bold text-white">{sheet.stops.length} stops</span>}
+                <div className="flex shrink-0 flex-wrap justify-end gap-1.5">
+                  {sheet.stops.length > 0 && <span className="rounded-full bg-[#173b64] px-2.5 py-1 text-xs font-bold text-white">{sheet.stops.length} stops</span>}
+                  {draftActive && hasDraftContent && (
+                    <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${draftIsSaved ? "bg-[#e7f3eb] text-[#216338]" : "bg-[#fff4d6] text-[#80540b]"}`}>
+                      {draftIsSaved ? "Saved on this phone" : "Saving draft…"}
+                    </span>
+                  )}
+                </div>
               </div>
             </div>
           )}
@@ -1503,7 +1586,7 @@ export function TripApp() {
                                 type="button"
                                 className="col-start-3 row-start-1 h-8 w-8 touch-manipulation rounded-md border border-[#edd5d2] bg-white text-xs text-[#8f2c1c] sm:col-auto sm:row-auto"
                                 aria-label="Delete this direction"
-                                onClick={() => setSheet({ ...sheet, stops: sheet.stops.map((s, i) => (i === si ? { ...s, maneuvers: s.maneuvers.filter((_, j) => j !== mi) } : s)) })}
+                                onClick={() => deleteManeuver(si, mi)}
                               >
                                 ✕
                               </button>
@@ -1595,16 +1678,7 @@ export function TripApp() {
               })}
             </div>
           )}
-          {undo && (
-            <div className="fixed inset-x-0 bottom-20 z-40 px-3" role="status">
-              <div className="mx-auto flex max-w-lg items-center justify-between gap-2 rounded-lg bg-[#142033] px-3 py-2 text-sm text-white shadow-lg">
-                <span>Stop deleted.</span>
-                <button type="button" className="h-10 rounded-md bg-[#f5c451] px-4 font-semibold text-[#142033]" onClick={undoDelete}>
-                  Undo
-                </button>
-              </div>
-            </div>
-          )}
+          {renderUndoToast()}
           <div className="fixed inset-x-0 bottom-0 z-[1200] border-t border-[#dce3ec] bg-white p-3 shadow-[0_-8px_28px_rgba(24,39,62,0.12)]">
             <div className="mx-auto flex max-w-2xl flex-col gap-2">
               {routeBuilding ? <RouteBuildStatus message={status} /> : status && <p className="text-sm font-medium">{status}</p>}
@@ -1800,6 +1874,7 @@ export function TripApp() {
               ))}
             </ul>
           )}
+          {renderUndoToast()}
           <div className="fixed inset-x-0 bottom-0 z-[1200] border-t border-[#dce3ec] bg-white p-3 shadow-[0_-8px_28px_rgba(24,39,62,0.12)]">
             <div className="mx-auto flex max-w-2xl flex-col gap-2">
               {routeBuilding && <RouteBuildStatus message={status} />}
