@@ -1,5 +1,6 @@
 import { canonicalKey, routeKeyFromRef, schoolSig } from "./names";
 import type { LonLat, RawLine, RawPlace } from "./types";
+import { minDistToLine } from "./geo";
 
 const DRIVE = new Set([
   "motorway",
@@ -38,6 +39,19 @@ function str(v: string | number | boolean | undefined): string {
   return v == null ? "" : String(v);
 }
 
+function samples(coords: LonLat[]): LonLat[] {
+  const step = Math.max(1, Math.ceil(coords.length / 12));
+  return coords.filter((_, i) => i === 0 || i === coords.length - 1 || i % step === 0);
+}
+
+function lineMatchDistance(a: LonLat[], b: LonLat[]): { average: number; maximum: number } {
+  const distances = samples(a).map((point) => minDistToLine(point, b).d);
+  return {
+    average: distances.reduce((sum, distance) => sum + distance, 0) / distances.length,
+    maximum: Math.max(...distances),
+  };
+}
+
 /**
  * Read OpenFreeMap / OpenMapTiles roads.
  * Names live on `transportation_name` (with highway refs); campus drives are unnamed
@@ -51,6 +65,8 @@ export async function decodeTiles(tiles: TileBuffer[]): Promise<{ lines: RawLine
 
   for (const tile of tiles) {
     const decoded = new VectorTile(new Pbf(tile.bytes)) as unknown as { layers: Record<string, TileLayer> };
+    const namedFeatures: { name: string; keys: string[]; coords: LonLat[]; cls: string }[] = [];
+    const roadFeatures: { coords: LonLat[]; cls: string; oneway: number }[] = [];
     const names = decoded.layers.transportation_name;
     if (names) {
       for (let i = 0; i < names.length; i++) {
@@ -76,12 +92,11 @@ export async function decodeTiles(tiles: TileBuffer[]): Promise<{ lines: RawLine
         const gj = f.toGeoJSON(tile.x, tile.y, tile.z);
         for (const coords of asLines(gj.geometry.coordinates, gj.geometry.type)) {
           if (coords.length < 2) continue;
-          lines.push({
+          namedFeatures.push({
             name: name || rk || "road",
             keys: uniq,
             coords,
-            kind: "named",
-            oneway: 0,
+            cls,
           });
         }
       }
@@ -92,16 +107,42 @@ export async function decodeTiles(tiles: TileBuffer[]): Promise<{ lines: RawLine
       for (let i = 0; i < roads.length; i++) {
         const f = roads.feature(i);
         const p = f.properties;
-        if (str(p.class) !== "service") continue;
-        const svc = str(p.service);
-        if (svc === "parking_aisle" || svc === "emergency") continue;
-        if (str(p.access) === "no") continue;
+        const cls = str(p.class);
         const gj = f.toGeoJSON(tile.x, tile.y, tile.z);
         for (const coords of asLines(gj.geometry.coordinates, gj.geometry.type)) {
           if (coords.length < 2) continue;
+          if (DRIVE.has(cls)) roadFeatures.push({ coords, cls, oneway: num(p.oneway) });
+          if (cls !== "service") continue;
+          const svc = str(p.service);
+          if (svc === "parking_aisle" || svc === "emergency" || str(p.access) === "no") continue;
           lines.push({ name: "service road", keys: [], coords, kind: "service", oneway: num(p.oneway) });
         }
       }
+    }
+
+    // transportation_name stitches same-named roads for label placement and omits
+    // oneway. Match its names to transportation geometry, which carries OSM direction.
+    const matchedNames = new Set<number>();
+    for (const road of roadFeatures) {
+      let best: { index: number; average: number } | null = null;
+      for (let i = 0; i < namedFeatures.length; i++) {
+        const named = namedFeatures[i];
+        if (named.cls !== road.cls) continue;
+        const distance = lineMatchDistance(road.coords, named.coords);
+        if (distance.maximum > 12 || distance.average > 5) continue;
+        if (!best || distance.average < best.average) best = { index: i, average: distance.average };
+      }
+      if (!best) continue;
+      const named = namedFeatures[best.index];
+      matchedNames.add(best.index);
+      lines.push({ name: named.name, keys: named.keys, coords: road.coords, kind: "named", oneway: road.oneway });
+    }
+    for (let i = 0; i < namedFeatures.length; i++) {
+      if (matchedNames.has(i)) continue;
+      const named = namedFeatures[i];
+      // Keep the named geometry available when the direction layer has no match;
+      // the app's route disclaimer continues to call out incomplete one-way data.
+      lines.push({ name: named.name, keys: named.keys, coords: named.coords, kind: "named", oneway: 0 });
     }
 
     const pois = decoded.layers.poi;
