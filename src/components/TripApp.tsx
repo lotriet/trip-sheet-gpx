@@ -123,6 +123,7 @@ export function TripApp() {
   const [tripEdits, setTripEdits] = useState<Record<string, { text: string; sheet: Sheet; map?: MapData }>>({});
   const [bigThumb, setBigThumb] = useState<string | null>(null);
   const [mapRun, setMapRun] = useState<string | null>(null);
+  const [directionMapStop, setDirectionMapStop] = useState<number | null>(null);
   const [warningAcknowledged, setWarningAcknowledged] = useState(false);
   const [showInstallHelp, setShowInstallHelp] = useState(false);
   const offerHomeScreenInstall = useSyncExternalStore(noSubscribe, canOfferHomeScreenInstall, () => false);
@@ -150,6 +151,7 @@ export function TripApp() {
     [mapData, loadedArea, area],
   );
   const hasStops = sheet.stops.length > 0;
+  const editingRun = editingId ? runs.find((run) => run.id === editingId) : undefined;
   // Fresh lookups of names the loaded map doesn't have, keyed by the typed text.
   const [lookups, setLookups] = useState<Record<string, { state: "looking" | "found" | "none"; name?: string }>>({});
   const [recheckTick, setRecheckTick] = useState(0);
@@ -337,6 +339,7 @@ export function TripApp() {
 
   function openNew() {
     setEditingId(null);
+    setDirectionMapStop(null);
     setText("");
     setSheet(emptySheet());
     setRoute(null);
@@ -352,6 +355,7 @@ export function TripApp() {
 
   function openEdit(run: SavedRun) {
     setEditingId(run.id);
+    setDirectionMapStop(null);
     setText(run.sheetText);
     setArea(run.area || area);
     const parsed = parseSheet(run.sheetText);
@@ -1289,9 +1293,38 @@ export function TripApp() {
                             />
                             {st.label && <p className="mt-1 text-xs text-[#15803d]">On the map: {st.label}</p>}
                             {editWarnings.filter((w) => w.stopIndex === si && w.maneuverIndex === mi).map((w, wi) => (
-                              <p key={`route-warning-${wi}`} role="alert" className="mt-2 rounded-md border border-[#f0c36d] bg-[#ffedd5] p-2 text-sm text-[#7f1d1d]">
-                                Route warning: {w.message}
-                              </p>
+                              <div key={`route-warning-${wi}`} className="mt-2 rounded-md border border-[#f0c36d] bg-[#ffedd5] p-2 text-sm text-[#7f1d1d]">
+                                <p role="alert">Route warning: {w.message}</p>
+                                {editingRun && editingRun.coords.length > 1 && (
+                                  <>
+                                    <Button
+                                      type="button"
+                                      variant="outline"
+                                      className="mt-2 h-10 border-[#d9d2c3] bg-white text-[#142033]"
+                                      aria-expanded={directionMapStop === si}
+                                      onClick={() => {
+                                        const opening = directionMapStop !== si;
+                                        setDirectionMapStop(opening ? si : null);
+                                        if (opening) requestAnimationFrame(() => document.querySelector("[data-direction-map]")?.scrollIntoView({ behavior: "smooth", block: "center" }));
+                                      }}
+                                    >
+                                      {directionMapStop === si ? "Hide map" : `See stop ${si + 1} on map`}
+                                    </Button>
+                                    {directionMapStop === si && (
+                                      <div className="mt-2 rounded-lg bg-white p-2" data-direction-map>
+                                        <p className="mb-2 text-xs text-[#3d4b63]">Red ring marks this stop; the dark line is the saved route. Zoom and pan to inspect the turn.</p>
+                                        <RouteMap
+                                          coords={editingRun.coords}
+                                          stops={editingRun.stops.map((savedStop, stopIndex) => ({ lat: savedStop.lat, lon: savedStop.lon, label: `Stop ${stopIndex + 1}: ${savedStop.description}` }))}
+                                          turnarounds={[]}
+                                          warningStops={editingRun.stops[si] ? [{ lat: editingRun.stops[si].lat, lon: editingRun.stops[si].lon, label: `Check stop ${si + 1}` }] : []}
+                                          focusPoint={editingRun.stops[si] ? { lat: editingRun.stops[si].lat, lon: editingRun.stops[si].lon, key: si + 1 } : undefined}
+                                        />
+                                      </div>
+                                    )}
+                                  </>
+                                )}
+                              </div>
                             ))}
                             {suggestFor === mid && (
                               <SuggestPanel
