@@ -226,6 +226,7 @@ export function TripApp() {
     | null
   >(null);
   const scrollRestoreRef = useRef<number | null>(null);
+  const warningAdvanceRef = useRef<{ order: string[]; active: string } | null>(null);
   const lookKey = (raw: string) => raw.trim().toLowerCase().replace(/\s+/g, " ");
   const runCenter = useMemo(() => {
     if (!mapData) return null;
@@ -471,6 +472,35 @@ export function TripApp() {
     scrollRestoreRef.current = null;
     const frame = requestAnimationFrame(() => window.scrollTo({ top, behavior: "auto" }));
     return () => cancelAnimationFrame(frame);
+  }, [route, view, routeBuilding]);
+
+  useEffect(() => {
+    const pending = warningAdvanceRef.current;
+    if (!pending || !route || view !== "preview" || routeBuilding) return;
+    warningAdvanceRef.current = null;
+    const remaining = route.warnings.filter((warning) => warning.level === "warn");
+    const activeIndex = pending.order.indexOf(pending.active);
+    for (let offset = 1; offset <= pending.order.length; offset++) {
+      const candidate = pending.order[(activeIndex + offset) % pending.order.length];
+      const nextIndex = remaining.findIndex((warning) => `${warning.stopIndex}:${warning.message}` === candidate);
+      if (nextIndex < 0) continue;
+      setWarningCursor((nextIndex + 1) % remaining.length);
+      scrollRestoreRef.current = null;
+      const frame = requestAnimationFrame(() => {
+        document.querySelector<HTMLElement>(`[data-route-warning="${nextIndex}"]`)?.scrollIntoView({ behavior: "smooth", block: "center" });
+      });
+      return () => cancelAnimationFrame(frame);
+    }
+    scrollRestoreRef.current = null;
+    if (remaining.length > 0) {
+      setWarningCursor(remaining.length === 1 ? 0 : 1);
+      const frame = requestAnimationFrame(() => {
+        document.querySelector<HTMLElement>('[data-route-warning="0"]')?.scrollIntoView({ behavior: "smooth", block: "center" });
+      });
+      return () => cancelAnimationFrame(frame);
+    }
+    // The rebuild cleared every remaining issue.
+    window.scrollTo({ top: 0, behavior: "smooth" });
   }, [route, view, routeBuilding]);
 
   function openNew() {
@@ -772,7 +802,7 @@ export function TripApp() {
       setError("Add at least one stop before building the route.");
       return;
     }
-    setWarningCursor(0);
+    if (!warningAdvanceRef.current) setWarningCursor(0);
     setRouteBuilding(true);
     setStatus("Building the route…");
     try {
@@ -782,6 +812,7 @@ export function TripApp() {
       setStatus("Following the printed streets…");
       const result = await routeSheet(current, data, nextOverrides, osrmRouter);
       if (!result.ok) {
+        warningAdvanceRef.current = null;
         setError(result.error);
         setStatus("");
         return;
@@ -799,6 +830,7 @@ export function TripApp() {
       setStatus("");
     } catch (err) {
       scrollRestoreRef.current = null;
+      warningAdvanceRef.current = null;
       setError(err instanceof Error ? err.message : "The route could not be built.");
       setStatus("");
     } finally {
@@ -810,6 +842,7 @@ export function TripApp() {
   function focusWarning(stopIndex: number, message: string, street?: string) {
     const stop = route?.stops.find((s) => s.index === stopIndex);
     if (!stop) return;
+    queueWarningAdvance(stopIndex, undefined, message);
     setMapFocus({ lat: stop.lat, lon: stop.lon, key: ++mapFocusKey.current });
     setMapFixContext({ stopIndex, message, street });
     setTapMode("via");
@@ -819,10 +852,23 @@ export function TripApp() {
   function editWarning(stopIndex: number, maneuverIndex: number) {
     const maneuver = sheet.stops[stopIndex]?.maneuvers[maneuverIndex];
     if (!maneuver) return;
+    queueWarningAdvance(stopIndex, maneuverIndex);
     setTapMode(null);
     setMapFixContext(null);
     setWarningFix({ stopIndex, maneuverIndex, kind: maneuver.kind, street: maneuver.street });
     requestAnimationFrame(() => document.querySelector(`[data-stop-row="${stopIndex}"]`)?.scrollIntoView({ behavior: "smooth", block: "center" }));
+  }
+
+  function queueWarningAdvance(stopIndex: number, maneuverIndex?: number, message?: string) {
+    const warnings = route?.warnings.filter((warning) => warning.level === "warn") ?? [];
+    const active = warnings.find((warning) => warning.stopIndex === stopIndex &&
+      (maneuverIndex === undefined || warning.maneuverIndex === maneuverIndex) &&
+      (message === undefined || warning.message === message));
+    if (!active) return;
+    warningAdvanceRef.current = {
+      order: warnings.map((warning) => `${warning.stopIndex}:${warning.message}`),
+      active: `${active.stopIndex}:${active.message}`,
+    };
   }
 
   function rebuildWarningFix() {
@@ -1800,7 +1846,7 @@ export function TripApp() {
                         </select>
                         <Input aria-label="Correct street name" value={warningFix.street} onChange={(e) => setWarningFix({ ...warningFix, street: e.target.value })} placeholder="Street name from the trip sheet" />
                         <div className="flex gap-2">
-                          <Button type="button" variant="outline" className="h-10 flex-1" onClick={() => setWarningFix(null)}>Cancel</Button>
+                          <Button type="button" variant="outline" className="h-10 flex-1" onClick={() => { setWarningFix(null); warningAdvanceRef.current = null; }}>Cancel</Button>
                           <Button type="button" className="h-10 flex-1 bg-[#0f2744] text-white" disabled={!warningFix.street.trim() || !!status} onClick={rebuildWarningFix}>Save and rebuild</Button>
                         </div>
                         <div className="grid grid-cols-2 gap-2">
@@ -1883,7 +1929,7 @@ export function TripApp() {
                   type="button"
                   variant="outline"
                   className="h-12 w-full bg-white text-base"
-                  onClick={() => { setTapMode(null); setMapFixContext(null); setPick(null); }}
+                  onClick={() => { setTapMode(null); setMapFixContext(null); setPick(null); warningAdvanceRef.current = null; }}
                 >
                   Cancel map fix
                 </Button>
