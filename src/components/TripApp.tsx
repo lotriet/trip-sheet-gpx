@@ -1267,7 +1267,7 @@ export function TripApp() {
                       </button>
                     </div>
                     <div className="flex items-end gap-2">
-                      <Input className="h-12 w-32 shrink-0 bg-white text-base" value={stop.time} aria-label="Stop time" onChange={(e) => setSheet({ ...sheet, stops: sheet.stops.map((s, i) => (i === si ? { ...s, time: e.target.value } : s)) })} />
+                      <Input className="h-11 w-32 shrink-0 bg-white text-base" value={stop.time} aria-label="Stop time" onChange={(e) => setSheet({ ...sheet, stops: sheet.stops.map((s, i) => (i === si ? { ...s, time: e.target.value } : s)) })} />
                       <StreetMark state={stopCheck.state} open={suggestFor === sid} onTap={() => void tapMark(sid, stopCheck.missing)} />
                     </div>
                     <WrapField
@@ -1292,7 +1292,7 @@ export function TripApp() {
                         }}
                       />
                     )}
-                    <ul className="mt-2 space-y-2">
+                    <ul className="mt-2 space-y-1.5">
                       {stop.maneuvers.map((m, mi) => {
                         const st = streetState(m.street);
                         const mid = `${si}-${mi}`;
@@ -1303,10 +1303,10 @@ export function TripApp() {
                           : null;
                         const nearbyTargetRoad = targetRoad && targetRoad.distance <= 0.015 ? targetRoad : null;
                         return (
-                          <li key={mi} className="rounded-lg bg-[#f6f3ea] p-2">
+                          <li key={mi} className="rounded-lg bg-[#f6f3ea] p-1.5">
                             <div className="flex items-center gap-2">
                               <select
-                                className="h-12 min-w-0 flex-1 rounded-lg border border-[#d9d2c3] bg-white px-2 text-base"
+                                className="h-11 min-w-0 flex-1 rounded-lg border border-[#d9d2c3] bg-white px-2 text-base"
                                 value={m.kind}
                                 aria-label="Direction"
                                 onChange={(e) => updateManeuver(si, mi, { kind: e.target.value as ManeuverKind })}
@@ -1320,7 +1320,7 @@ export function TripApp() {
                               <StreetMark state={st.state} open={suggestFor === mid} onTap={() => void tapMark(mid, st.state === "found" ? [] : [m.street])} />
                               <button
                                 type="button"
-                                className="h-12 touch-manipulation rounded-lg border border-[#d9d2c3] bg-white px-3 text-base"
+                                className="h-11 touch-manipulation rounded-lg border border-[#d9d2c3] bg-white px-3 text-base"
                                 aria-label="Delete this direction"
                                 onClick={() => setSheet({ ...sheet, stops: sheet.stops.map((s, i) => (i === si ? { ...s, maneuvers: s.maneuvers.filter((_, j) => j !== mi) } : s)) })}
                               >
@@ -1551,20 +1551,24 @@ export function TripApp() {
                           <Button type="button" variant="outline" className="h-10 flex-1" onClick={() => setWarningFix(null)}>Cancel</Button>
                           <Button type="button" className="h-10 flex-1 bg-[#0f2744] text-white" disabled={!warningFix.street.trim() || !!status} onClick={rebuildWarningFix}>Save and rebuild</Button>
                         </div>
-                        <Button type="button" variant="destructive" className="h-10 w-full" disabled={!!status} onClick={deleteWarningDirection}>Delete this direction and rebuild</Button>
-                        <Button
-                          type="button"
-                          variant="outline"
-                          className="h-10 w-full"
-                          disabled={!!status}
-                          onClick={() => {
-                            setWarningFix(null);
-                            setView("edit");
-                            window.scrollTo(0, 0);
-                          }}
-                        >
-                          Open full trip-sheet text editor
-                        </Button>
+                        <div className="grid grid-cols-2 gap-2">
+                          <Button type="button" variant="destructive" className="h-10 px-2 text-xs" disabled={!!status} onClick={deleteWarningDirection} aria-label="Delete this direction and rebuild">
+                            Delete direction
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            className="h-10 px-2 text-xs"
+                            disabled={!!status}
+                            onClick={() => {
+                              setWarningFix(null);
+                              setView("edit");
+                              window.scrollTo(0, 0);
+                            }}
+                          >
+                            Edit sheet text
+                          </Button>
+                        </div>
                       </div>
                     )}
                   </li>
