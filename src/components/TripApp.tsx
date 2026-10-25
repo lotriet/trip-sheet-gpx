@@ -881,7 +881,7 @@ export function TripApp() {
       )}
 
       {view === "day" && (
-        <section className="flex flex-1 flex-col gap-3 px-4 py-4 pb-40">
+        <section className="flex flex-1 flex-col gap-3 px-4 py-4 pb-48">
           {!ready && <p className="text-sm">Opening today’s list…</p>}
           {ready && runs.length === 0 && (
             <div className="rounded-xl bg-white p-4 ring-1 ring-[#d9d2c3]">
@@ -894,10 +894,27 @@ export function TripApp() {
               </ol>
             </div>
           )}
+          {runs.length > 0 && (
+            <div className="rounded-xl bg-white px-3 py-2 ring-1 ring-[#d9d2c3]">
+              <div className="flex items-center justify-between gap-3">
+                <p className="text-sm font-semibold">Today’s order · {runs.length} {runs.length === 1 ? "run" : "runs"}</p>
+                {runs.some((run) => run.warnings.some((warning) => warning.level === "warn")) && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="h-9 shrink-0 border-[#b91c1c] bg-[#fff7ed] px-3 text-sm text-[#7f1d1d]"
+                    onClick={() => document.querySelector<HTMLElement>("[data-warning-run]")?.scrollIntoView({ behavior: "smooth", block: "center" })}
+                  >
+                    Jump to route check
+                  </Button>
+                )}
+              </div>
+            </div>
+          )}
           {runs.map((run, i) => {
             const warnings = run.warnings.filter((w) => w.level === "warn");
             return (
-            <article key={run.id} className="rounded-xl bg-white p-3 ring-1 ring-[#d9d2c3]">
+            <article key={run.id} data-warning-run={warnings.length ? "true" : undefined} className="rounded-xl bg-white p-3 ring-1 ring-[#d9d2c3]">
               <div className="flex items-start justify-between gap-2">
                 <div>
                   <p className="text-xs font-semibold text-[#0f2744]">Run {i + 1}</p>
@@ -911,11 +928,11 @@ export function TripApp() {
                   </p>
                 </div>
                 <div className="flex flex-col gap-1">
-                  <Button type="button" variant="outline" className="h-10 px-3" onClick={() => move(i, -1)} disabled={exportingDay || i === 0}>
-                    Up
+                  <Button type="button" variant="outline" className="h-10 px-3" onClick={() => move(i, -1)} disabled={exportingDay || i === 0} aria-label={`Move run ${i + 1} earlier`}>
+                    Earlier
                   </Button>
-                  <Button type="button" variant="outline" className="h-10 px-3" onClick={() => move(i, 1)} disabled={exportingDay || i === runs.length - 1}>
-                    Down
+                  <Button type="button" variant="outline" className="h-10 px-3" onClick={() => move(i, 1)} disabled={exportingDay || i === runs.length - 1} aria-label={`Move run ${i + 1} later`}>
+                    Later
                   </Button>
                 </div>
               </div>
@@ -983,6 +1000,7 @@ export function TripApp() {
                   {canShare ? "Share all" : "Download all"}
                 </Button>
               </div>
+              <p className="text-center text-xs leading-relaxed text-[#3d4b63]">One GPX combines runs in this order. Share all sends a separate file for each run.</p>
             </div>
           </div>
         </section>
