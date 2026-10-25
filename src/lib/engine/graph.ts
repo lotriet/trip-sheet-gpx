@@ -8,6 +8,7 @@ export type GraphLine = {
   keys: string[];
   coords: LonLat[];
   oneway: number;
+  synthetic?: "crossing-gap" | "expected-intersection";
 };
 
 export type GraphEdge = {
@@ -18,6 +19,7 @@ export type GraphEdge = {
   name: string;
   coords: LonLat[];
   length: number;
+  synthetic?: "crossing-gap" | "expected-intersection" | "same-road-gap";
 };
 
 export type GraphNode = {
@@ -81,6 +83,7 @@ export function buildGraph(input: GraphLine[], linkKeys?: Set<string>): Graph {
       name: l.name,
       keys: [...new Set(l.keys)],
       oneway: l.oneway,
+      synthetic: l.synthetic,
       coords: dedupeConsecutive(l.coords.map((c) => [c[0], c[1]] as LonLat)),
     }))
     .filter((l) => l.coords.length >= 2);
@@ -152,7 +155,7 @@ export function buildGraph(input: GraphLine[], linkKeys?: Set<string>): Graph {
   }
   for (const c of connectors) {
     if (haversine(c.coords[0], c.coords[1]) < 1.2) continue;
-    pls.push({ name: c.name, keys: c.keys, oneway: 0, coords: c.coords });
+    pls.push({ name: c.name, keys: c.keys, oneway: 0, synthetic: c.synthetic, coords: c.coords });
   }
 
   // Snap endpoints onto nearby vertices so T-intersections share a node.
@@ -230,6 +233,7 @@ export function buildGraph(input: GraphLine[], linkKeys?: Set<string>): Graph {
       name: line.name,
       coords,
       length,
+      synthetic: line.synthetic,
     };
     edges.push(edge);
     ensure(from, coords[0]).out.push(edge);
@@ -270,7 +274,7 @@ function linkNearMisses(
   splits: { t: number; point: LonLat }[][][],
   segGrid: Map<string, { pi: number; si: number }[]>,
   linkKeys: Set<string>,
-): { name: string; keys: string[]; coords: LonLat[] }[] {
+): { name: string; keys: string[]; coords: LonLat[]; synthetic: "crossing-gap" }[] {
   const listed = (keys: string[]) => keys.some((k) => linkKeys.has(k));
   const best = new Map<string, { d: number; pi: number; si: number; t: number; p: LonLat; qj: number; sj: number; u: number; q: LonLat }>();
 
@@ -321,7 +325,7 @@ function linkNearMisses(
     }
   }
 
-  const connectors: { name: string; keys: string[]; coords: LonLat[] }[] = [];
+  const connectors: { name: string; keys: string[]; coords: LonLat[]; synthetic: "crossing-gap" }[] = [];
   for (const hit of best.values()) {
     splits[hit.pi][hit.si].push({ t: hit.t, point: hit.p });
     splits[hit.qj][hit.sj].push({ t: hit.u, point: hit.q });
@@ -335,6 +339,7 @@ function linkNearMisses(
       name: owner.name,
       keys: owner.keys.filter((k) => linkKeys.has(k)).map((k) => `xlink:${k}`),
       coords: [hit.p, hit.q],
+      synthetic: "crossing-gap",
     });
   }
   return connectors;
@@ -395,6 +400,7 @@ function bridgeNamedGaps(
             name,
             coords: line.map((c) => [c[0], c[1]]),
             length: d,
+            synthetic: "same-road-gap",
           };
           edges.push(edge);
           from.out.push(edge);

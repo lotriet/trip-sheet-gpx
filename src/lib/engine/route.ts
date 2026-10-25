@@ -123,7 +123,7 @@ function lineNear(coords: LonLat[], point: LonLat, maxM: number): boolean {
 export function prepareLines(sheet: Sheet, named: RawLine[], services: RawLine[], places: RawPlace[]): GraphLine[] {
   const lines: GraphLine[] = named
     .filter((l) => l.kind === "named" && l.keys.length && l.coords.length >= 2)
-    .map((l) => ({ name: l.name, keys: l.keys, coords: l.coords, oneway: 0 }));
+    .map((l) => ({ name: l.name, keys: l.keys, coords: l.coords, oneway: l.oneway }));
 
   const flat = flattenManeuvers(sheet);
   const attached = new Set<string>();
@@ -222,7 +222,7 @@ export function gapLinks(pairs: [string, string][], lines: GraphLine[]): GraphLi
       kept.push(h);
     }
     for (const h of kept) {
-      out.push({ name: "gap", keys: [`xlink:${a}`, `xlink:${b}`, "gap:"], coords: [h.p, h.q], oneway: 0 });
+      out.push({ name: "gap", keys: [`xlink:${a}`, `xlink:${b}`, "gap:"], coords: [h.p, h.q], oneway: 0, synthetic: "expected-intersection" });
     }
   }
   return out;
@@ -713,8 +713,8 @@ async function routeFrom(
   const flat = flattenManeuvers(sheet);
   const vias = (overrides.vias ?? []).map((v, i) => ({ ...v, i, used: false }));
 
-  const warn = (level: Warning["level"], stopIndex: number, maneuverIndex: number, message: string) => {
-    warnings.push({ level, stopIndex, maneuverIndex, message });
+  const warn = (level: Warning["level"], stopIndex: number, maneuverIndex: number, message: string, location?: LonLat) => {
+    warnings.push({ level, stopIndex, maneuverIndex, message, ...(location ? { location } : {}) });
   };
 
   const travel = (along: string, goal: Goal, minMeters = 12): Travel | null => {
@@ -763,7 +763,13 @@ async function routeFrom(
       } catch {
         path = null;
       }
-      if (path && (path.length < 2 || polylineMeters(path) > 2.5 * haversine(from, to) + 800)) path = null;
+      if (path && (
+        path.length < 2 ||
+        haversine(path[0], from) > 80 ||
+        haversine(path.at(-1)!, to) > 80 ||
+        polylineMeters(path) > 2.5 * haversine(from, to) + 800 ||
+        (via != null && minDistToLine(via, path).d > 80)
+      )) path = null;
     }
     const line = path ?? [from, to];
     appendLine(coords, line, 0.4);
@@ -965,8 +971,31 @@ async function routeFrom(
   }
 
   // A tap that never landed on the street being driven still has to move the track.
-  await pullVias(coords, vias, router, (message) => warn("info", 0, 0, message));
+  await pullVias(coords, vias, router, (level, message) => warn(level, -1, -1, message));
   const viaStreets = (overrides.vias ?? []).map((v) => nearestStreetName(graph, [v.lon, v.lat]));
+
+  // These graph edges are deliberate straight-line guesses across missing tile geometry.
+  // Require a visible warning whenever the actual route uses one.
+  const syntheticSeen = new Set<string>();
+  for (const edge of graph.edges) {
+    if (!edge.synthetic || edge.coords.length < 2) continue;
+    const a = edge.coords[0];
+    const b = edge.coords.at(-1)!;
+    const mid: LonLat = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
+    if ([a, mid, b].some((point) => minDistToLine(point, coords).d > 3)) continue;
+    const key = `${mid[0].toFixed(4)},${mid[1].toFixed(4)}`;
+    if (syntheticSeen.has(key)) continue;
+    syntheticSeen.add(key);
+    const meters = Math.round(polylineMeters(edge.coords));
+    const road = edge.name && edge.name !== "gap" ? ` on ${edge.name}` : "";
+    warn(
+      "warn",
+      -1,
+      -1,
+      `The map has an incomplete connection${road}; the route uses an assumed ${meters} m straight join. Check this point on the map.`,
+      mid,
+    );
+  }
 
   // Place stops along the finished track.
   const placement = placeStops(sheet, coords, anchors, graph, available, places);
@@ -1013,7 +1042,7 @@ async function pullVias(
   coords: LonLat[],
   vias: { lat: number; lon: number; used: boolean }[],
   router: Router | undefined,
-  note: (message: string) => void,
+  note: (level: Warning["level"], message: string) => void,
 ) {
   for (const via of vias) {
     const point: LonLat = [via.lon, via.lat];
@@ -1023,18 +1052,28 @@ async function pullVias(
       continue;
     }
     const near = minDistToLine(point, coords).point;
-    let path: LonLat[] = [point];
+    let path: LonLat[] | null = null;
     if (router) {
       try {
         const driven = await router([near, point, near]);
-        if (driven && driven.length >= 2) path = driven;
+        const nearAgain = driven?.at(-1);
+        const reasonableLength = driven && polylineMeters(driven) <= 5 * haversine(near, point) + 800;
+        const reachesTap = driven && minDistToLine(point, driven).d <= 75;
+        if (driven && driven.length >= 2 && nearAgain && haversine(driven[0], near) <= 80 && haversine(nearAgain, near) <= 80 && reasonableLength && reachesTap) {
+          path = driven;
+        }
       } catch {
-        path = [point];
+        path = null;
       }
     }
-    insertOutAndBack(coords, point, path);
+    if (path) {
+      insertOutAndBack(coords, point, path);
+      note("info", "The track now passes along mapped roads through the point you added.");
+    } else {
+      insertOutAndBack(coords, point, [point]);
+      note("warn", "Couldn't find a drivable connection to the point you added. The track uses straight lines to and from it. Check this section before exporting.");
+    }
     via.used = true;
-    note("The track now passes through a point you added on the map.");
   }
 }
 

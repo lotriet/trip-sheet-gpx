@@ -55,6 +55,8 @@ export type Warning = {
   stopIndex: number;
   maneuverIndex: number;
   message: string;
+  /** Map position for route-geometry warnings not tied to a printed stop. */
+  location?: LonLat;
 };
 
 export type PlacedStop = {
