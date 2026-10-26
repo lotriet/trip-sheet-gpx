@@ -11,7 +11,7 @@ import { driveBetween } from "@/lib/engine/drive";
 import { buildGpx, maneuverPhrase } from "@/lib/engine/gpx";
 import { classifyLocation, parseSheet } from "@/lib/engine/parseSheet";
 import { routeSheet } from "@/lib/engine/route";
-import type { LonLat, Maneuver, ManeuverKind, RawLine, RouteOverrides, RouteSuccess, Sheet, TurnaroundPin, Warning } from "@/lib/engine/types";
+import type { LonLat, Maneuver, ManeuverKind, RawLine, RouteOverrides, RouteSuccess, Sheet, Stop, TurnaroundPin, Warning } from "@/lib/engine/types";
 import { loadAround, loadCorridor, loadMap, lookupName, mergeMaps, type MapData } from "@/lib/mapfetch";
 import { canonicalKey, looksLikePlace, schoolSig } from "@/lib/engine/names";
 import { matchPlace } from "@/lib/engine/route";
@@ -1508,6 +1508,8 @@ export function TripApp() {
           )}
           {runs.map((run, i) => {
             const warnings = run.warnings.filter((w) => w.level === "warn");
+            const notes = run.warnings.filter((w) => w.level === "info" && w.message.startsWith("One-way direction data"));
+            const runStops = sortStopsByTime(parseSheet(run.sheetText)).stops;
                 return (
             <article key={run.id} data-warning-run={warnings.length && !run.warningsAcknowledged ? run.id : undefined} className="rounded-2xl border border-[#dce3ec] bg-white p-3.5 shadow-[0_4px_14px_rgba(24,39,62,0.07)] transition-shadow hover:shadow-[0_7px_20px_rgba(24,39,62,0.1)]">
               <div className="flex items-start gap-3">
@@ -1540,7 +1542,10 @@ export function TripApp() {
                 <div className={`mt-3 rounded-xl border border-[#f0d28d] border-l-4 border-l-[#d28b16] p-3 ${run.warningsAcknowledged ? "bg-[#fffdf5]" : "bg-[#fff9ea]"}`} role={run.warningsAcknowledged ? "status" : "alert"}>
                   <p className="text-xs font-bold uppercase tracking-wide text-[#80540b]">{run.warningsAcknowledged ? `Reviewed · ${warnings.length} warning${warnings.length === 1 ? "" : "s"} still on route` : `Needs a quick check · ${warnings.length} ${warnings.length === 1 ? "warning" : "warnings"}`}</p>
                   <ul className="mt-1.5 list-disc space-y-1 pl-5 text-sm leading-relaxed text-[#463716]">
-                    {warnings.map((warning, n) => <li key={n}>{warning.message}</li>)}
+                    {warnings.map((warning, n) => {
+                      const where = warningPlace(runStops, warning);
+                      return <li key={n}>{where && <strong className="font-semibold">{where}: </strong>}{warning.message}</li>;
+                    })}
                   </ul>
                   <div className="mt-2.5 flex flex-wrap gap-2">
                     {run.warningsAcknowledged ? (
@@ -1561,6 +1566,9 @@ export function TripApp() {
                   </div>
                 </div>
               )}
+              {notes.map((note, n) => (
+                <p key={`note-${n}`} className="mt-2 text-xs leading-relaxed text-[#68758a]">Note: {note.message}</p>
+              ))}
               {lacksTurnPoints(run.gpx) && (
                 <p className="mt-2 rounded-lg border border-[#e5c981] bg-[#fff8e6] px-3 py-2 text-sm text-[#463716]">
                   Built before exact turn points. Tap Edit and build it again so GPX Nav gets each turn’s exact spot.
@@ -2525,4 +2533,13 @@ function routeTurnPins(route: RouteSuccess): TurnPin[] {
     if (!point || mark.kind === "turnaround") return [];
     return [{ lat: point[1], lon: point[0], label: maneuverPhrase(mark.kind, mark.street), kind: mark.kind, confirmed: mark.confirmed }];
   });
+}
+
+/** "Stop 2 · Left onto DAVIS DR" for a warning tied to a printed stop or direction. */
+function warningPlace(stops: Stop[], w: { stopIndex?: number; maneuverIndex?: number }): string {
+  if (typeof w.stopIndex !== "number" || w.stopIndex < 0) return "";
+  const stop = stops[w.stopIndex];
+  const head = `Stop ${w.stopIndex + 1}${stop?.time ? ` (${stop.time})` : ""}`;
+  const turn = typeof w.maneuverIndex === "number" && w.maneuverIndex >= 0 ? stop?.maneuvers[w.maneuverIndex] : undefined;
+  return turn ? `${head} · ${KIND_LABEL[turn.kind]} ${turn.street}` : head;
 }
