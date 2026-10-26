@@ -71,3 +71,20 @@ Left Turn Onto BIRCH LN
     assert.equal(result.warnings[0].stopIndex, 0);
   }
 });
+
+test("a stop the map can't pin sits after the turns before it, not on the stop before", async () => {
+  const sheet = parseSheet(`07:00 AM Deadhead - MAPLE AVE & ELM ST 0 0 900.010
+Proceed On MAPLE AVE
+Left Turn Onto BIRCH LN
+07:03 AM BIRCH LN 2 2 900.011
+07:06 AM BIRCH LN & PINE ST 2 0 900.012`);
+  const withPine = [...lines, line("Pine Street", [[-78.705, 35.805], [-78.7, 35.805]])];
+  const result = await routeSheet(sheet, { lines: withPine, places: [] });
+  assert.equal(result.ok, true, result.ok ? "" : result.error);
+  if (result.ok) {
+    const [first, streetOnly] = result.stops;
+    assert.ok(Math.abs(first.lon - -78.705) < 0.0005, `first stop at ${first.lon}`);
+    assert.ok(Math.abs(streetOnly.lon - -78.7) < 0.0005, `street-only stop at ${streetOnly.lon}, ${streetOnly.lat}`);
+    assert.ok(result.warnings.some((w) => w.stopIndex === 1 && /only a street name/.test(w.message)));
+  }
+});

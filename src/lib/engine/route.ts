@@ -1160,7 +1160,7 @@ async function routeFrom(
   }
 
   // Place stops along the finished track.
-  const placement = placeStops(sheet, coords, anchors, graph, available, places);
+  const placement = placeStops(sheet, coords, anchors, turnMarks, graph, available, places);
   warnings.push(...placement.warnings);
   const meters = polylineMeters(coords);
   const gpx = buildGpx(sheet, coords, placement.stops, turnMarks);
@@ -1278,6 +1278,7 @@ function placeStops(
   sheet: Sheet,
   track: LonLat[],
   anchors: { key: string; coord: LonLat; at: number }[],
+  turnMarks: TurnMark[],
   graph: Graph,
   available: Set<string>,
   places: RawPlace[],
@@ -1285,10 +1286,22 @@ function placeStops(
   const out: RouteSuccess["stops"] = [];
   const warnings: Warning[] = [];
   let minAt = 0;
+  // A stop's directions are driven after it, so it sits after the earlier stops'
+  // turns and before its own. Stops the map can't pin go in that stretch.
+  const windowFor = (index: number) => {
+    let from = minAt;
+    let to = track.length - 1;
+    for (const mark of turnMarks) {
+      if (mark.stopIndex < index) from = Math.max(from, mark.trackIndex);
+      else if (mark.trackIndex >= minAt) to = Math.min(to, mark.trackIndex);
+    }
+    return { from: Math.min(from, to), to };
+  };
   sheet.stops.forEach((stop, index) => {
     const loc = classifyLocation(stop.description);
     let coord: LonLat = track[Math.min(minAt, track.length - 1)] ?? track[0];
     let at = minAt;
+    let placed = index === 0;
 
     if (index === 0) {
       coord = track[0];
@@ -1300,11 +1313,13 @@ function placeStops(
       if (anchor) {
         at = Math.max(minAt, Math.min(anchor.at, track.length - 1));
         coord = track[at] ?? anchor.coord;
+        placed = true;
       } else if (p) {
         const hit = nearestIndex(track, [p.lon, p.lat], minAt);
         if (hit.d <= 350) {
           at = hit.index;
           coord = track[at];
+          placed = true;
         } else {
           warnings.push({ level: "warn", stopIndex: index, maneuverIndex: -1, message: `Couldn't place the SCHOOL stop “${stop.description}” near its mapped location on the route. Check this stop marker.` });
         }
@@ -1317,6 +1332,7 @@ function placeStops(
       if (anchor) {
         at = Math.max(minAt, Math.min(anchor.at, track.length - 1));
         coord = track[at] ?? anchor.coord;
+        placed = true;
       } else {
         warnings.push({ level: "warn", stopIndex: index, maneuverIndex: -1, message: `Couldn't confirm the end-of-street location for stop “${stop.description}” on the route. Check this stop marker.` });
       }
@@ -1328,14 +1344,33 @@ function placeStops(
         const hit = nearestIndex(track, n.coord, minAt);
         if (hit.d <= 60 && (!best || hit.index < best.at)) best = { at: hit.index, coord: track[hit.index] };
       }
+      if (!best) {
+        // The route passes near the corner without reaching it: take the closest point in this stop's stretch.
+        const { from, to } = windowFor(index);
+        let near = { index: from, d: Infinity };
+        for (const n of nodes) {
+          const hit = nearestIndex(track.slice(0, to + 1), n.coord, from);
+          if (hit.d < near.d) near = hit;
+        }
+        if (near.d <= 250) {
+          at = near.index;
+          coord = track[at];
+          placed = true;
+        }
+      }
       if (best) {
         coord = best.coord;
         at = best.at;
+        placed = true;
       } else {
         warnings.push({ level: "warn", stopIndex: index, maneuverIndex: -1, message: `The route doesn't reach the mapped intersection for stop “${stop.description}”. Its marker is approximate; check it on the map.` });
       }
     } else if (index > 0) {
       warnings.push({ level: "warn", stopIndex: index, maneuverIndex: -1, message: `Stop “${stop.description}” gives only a street name, so its exact position along the street is unknown. Check this stop marker.` });
+    }
+    if (!placed) {
+      at = windowFor(index).from;
+      coord = track[at] ?? coord;
     }
 
     out.push({
