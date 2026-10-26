@@ -722,7 +722,7 @@ export function TripApp() {
       return;
     }
     setStatus("");
-    const good = results.flatMap((r, i) => (r.ok ? [{ photo: i, name: r.name, text: r.text, thumb: r.thumb }] : []));
+    const good = results.flatMap((r, i) => (r.ok ? [{ photo: i, name: r.name, text: r.text, thumb: r.thumb, incomplete: r.incomplete, missingStops: r.missingStops }] : []));
     const bad = results.flatMap((r, i) => (r.ok ? [] : [{ photo: i, reason: r.reason }]));
     const unreadNote = bad.length
       ? results.length === 1
@@ -869,7 +869,9 @@ export function TripApp() {
     setError("");
     let current = requestedSheet;
     if (!current.stops.length && text.trim()) {
-      // Pasted text that was never read: read it now.
+      // Pasted text that was never read: read it now. Several runs go to the
+      // review list instead of being built as one route.
+      if (takeText([{ photo: -1, name: "Pasted text", text }])) return;
       const parsed = parseSheet(text);
       if (parsed.stops.length) {
         current = parsed;
@@ -1033,14 +1035,14 @@ export function TripApp() {
           : gpxNotice.state === "cancelled" ? "Sharing cancelled"
             : "GPX sent";
     const message = gpxNotice.state === "ready"
-      ? "The run is on today’s list. Share it to open in OsmAnd or save it to Files."
+      ? "The run is on today’s list. Share it to open in GPX Nav, or save it to Files."
       : gpxNotice.state === "sharing"
         ? "Opening the phone’s share options…"
         : gpxNotice.state === "downloaded"
-          ? "Find the file in Downloads or Files, then open it with OsmAnd."
+          ? "Find the file in Downloads or Files, then open it with GPX Nav."
           : gpxNotice.state === "cancelled"
             ? gpxNotice.source === "single" ? "The route is still available; you can share it again." : "Your run is still saved in today’s list."
-            : "Choose OsmAnd to open the track, or Save to Files for later.";
+            : "Choose GPX Nav to open the track, or Save to Files for later.";
     return (
       <div className={`fixed inset-x-0 ${bottom} z-[1300] px-3`} role="status" aria-live="polite">
         <div className="mx-auto flex max-w-2xl items-center justify-between gap-3 rounded-xl border border-[#cbd9eb] bg-white p-3 text-[#17243a] shadow-xl">
@@ -1071,14 +1073,21 @@ export function TripApp() {
       <section aria-label="Route issues" className="space-y-2">
         {issueCount > 0 && (
           <div className="flex items-center justify-between gap-3 rounded-xl border border-[#f0d28d] bg-[#fff9ea] px-3 py-2">
-            <p className="text-sm font-semibold text-[#68470b]">{warningAcknowledged ? `${issueCount} warning${issueCount === 1 ? "" : "s"} acknowledged · still present on route` : `${issueCount} ${issueCount === 1 ? "warning" : "warnings"} to review`}</p>
+            <p className="text-sm font-semibold text-[#68470b]">{warningAcknowledged ? `Checked · ${issueCount} warning${issueCount === 1 ? "" : "s"} still on route` : `${issueCount} ${issueCount === 1 ? "warning" : "warnings"} to check`}</p>
+            <div className="flex shrink-0 gap-1.5">
+            {warningAcknowledged ? (
+              <Button type="button" variant="outline" className="h-8 border-[#e5c981] bg-white px-2.5 text-xs font-semibold text-[#68470b]" onClick={() => setWarningAcknowledged(false)}>Undo</Button>
+            ) : (
+              <Button type="button" className="h-8 bg-[#173b64] px-2.5 text-xs font-semibold text-white" onClick={() => setWarningAcknowledged(true)}>I’ve checked these</Button>
+            )}
             <Button type="button" variant="outline" className="h-8 shrink-0 border-[#e5c981] bg-white px-2.5 text-xs font-semibold text-[#68470b]" onClick={() => {
               const target = warningCursor % issueCount;
               document.querySelector<HTMLElement>(`[data-route-warning="${target}"]`)?.scrollIntoView({ behavior: "smooth", block: "center" });
               setWarningCursor((current) => (current + 1) % issueCount);
             }}>
-              Next issue {warningCursor % issueCount + 1}/{issueCount}
+              Next {warningCursor % issueCount + 1}/{issueCount}
             </Button>
+            </div>
           </div>
         )}
         {route.warnings.map((w, i) => {
@@ -1272,6 +1281,14 @@ export function TripApp() {
 
   function shareCurrentRoute() {
     if (!route) return;
+    // Same rule as a saved run's Download GPX: list unchecked warnings once and ask.
+    const open = warningAcknowledged ? [] : route.warnings.filter((w) => w.level === "warn");
+    if (open.length) {
+      const list = open.slice(0, 4).map((w) => `• ${w.message}`).join("\n");
+      const more = open.length > 4 ? `\n…and ${open.length - 4} more.` : "";
+      if (!window.confirm(`This route has ${open.length} warning${open.length === 1 ? "" : "s"} to check:\n\n${list}${more}\n\nMark them checked and download the GPX?`)) return;
+      setWarningAcknowledged(true);
+    }
     const name = runFileName(0, { run: sheet.run, description: sheet.description, firstTime: sheet.stops[0]?.time ?? "" });
     void deliverGpx([{ name, text: buildGpx(sheet, route.coords, route.stops, route.turnMarks) }], name, "single");
   }
@@ -1427,7 +1444,7 @@ export function TripApp() {
           )}
 
       {status && <p className="bg-[#f5c451] px-4 py-2 text-sm font-medium text-[#142033]">{status}</p>}
-      {error && (
+      {error && view !== "edit" && (
         <p className="bg-[#7f1d1d] px-4 py-2 text-sm text-white" role="alert">
           {error}
         </p>
@@ -1440,8 +1457,7 @@ export function TripApp() {
             <div className="rounded-2xl border border-[#e1e6ed] bg-white p-5 shadow-sm">
               <div className="mb-3 flex h-11 w-11 items-center justify-center rounded-xl bg-[#e8eff8] text-xl text-[#173b64]">＋</div>
               <p className="text-lg font-bold tracking-tight">Start with a trip sheet</p>
-              <p className="mt-1 text-sm leading-relaxed text-[#586579]">Add photos, a PDF, or copied text. Check the stops and directions, then build a route you can save to OsmAnd.</p>
-              <Button type="button" className="mt-4 h-11 bg-[#173b64] px-4 text-white" onClick={openNew}>Add your first run</Button>
+              <p className="mt-1 text-sm leading-relaxed text-[#586579]">Add photos, a PDF, or copied text. Check the stops and directions, then build a route to open in GPX Nav.</p>
             </div>
           )}
           {runs.length > 0 && (
@@ -1610,6 +1626,7 @@ export function TripApp() {
               <Button type="button" className="h-11 rounded-xl bg-[#173b64] text-sm font-bold text-white shadow-sm" onClick={openNew} disabled={exportingDay}>
                 Add a run
               </Button>
+              {runs.length > 0 && (<>
               <div className="grid grid-cols-2 gap-2">
                 <Button type="button" variant="outline" className="h-10 rounded-xl border-[#dce3ec] bg-[#f8fafc] text-xs font-semibold" disabled={!runs.length || exportingDay} aria-describedby={unreviewedRuns.length ? "export-needs-review" : undefined} onClick={() => void exportDay()}>
                   {exportingDay ? "Preparing GPX…" : "One GPX for the day"}
@@ -1621,11 +1638,12 @@ export function TripApp() {
               {unreviewedRuns.length > 0 ? (
                 // Shown here, next to the buttons, because the list's own notice is off screen.
                 <p id="export-needs-review" className="text-center text-xs font-semibold leading-relaxed text-[#80540b]">
-                  Review warnings on {unreviewedRuns.map((run) => `run ${runs.indexOf(run) + 1}`).join(", ")} first. Tap a button to go there.
+                  Check the warnings on {unreviewedRuns.map((run) => `run ${runs.indexOf(run) + 1}`).join(", ")} first. Tap a button to go there.
                 </p>
               ) : (
                 <p className="text-center text-xs leading-relaxed text-[#3d4b63]">One GPX combines runs in this order. Share all sends a separate file for each run.</p>
               )}
+              </>)}
             </div>
           </div>
         </section>
@@ -1656,6 +1674,12 @@ export function TripApp() {
                       <span className="text-lg font-semibold">Run {trip.run || "?"}</span>
                       <span className="text-base">{trip.firstTime || "no time"} ›</span>
                     </span>
+                    {(shown ?? trip.sheet).description && <span className="block truncate text-sm font-medium text-[#46546a]">{(shown ?? trip.sheet).description}</span>}
+                    {trip.pages.some((p) => p.incomplete || p.missingStops) && (
+                      <span className="mt-1 block text-sm font-medium text-[#80540b]">
+                        A photo may be missing stops (cut off or not fully read). Check it against the sheet.
+                      </span>
+                    )}
                     <span className="block text-sm text-[#3d4b63]">
                       {stops} stops · {turns} turns · {trip.pages.length === 1 ? "1 page" : `${trip.pages.length} pages`}
                       {edited ? " · fixed" : ""}
@@ -1740,7 +1764,7 @@ export function TripApp() {
               <div className="flex items-center justify-between gap-3">
                 <div>
                   <p className="text-[0.68rem] font-bold uppercase tracking-[0.14em] text-[#718097]">Trip sheet setup</p>
-                  <p className="mt-0.5 text-base font-bold text-[#17243a]">Add a sheet, then check the details</p>
+                  <p className="mt-0.5 text-base font-bold text-[#17243a]">{sheet.stops.length ? "Check the stops and directions" : "Add a sheet, then check the details"}</p>
                 </div>
                 <div className="flex shrink-0 flex-wrap justify-end gap-1.5">
                   {sheet.stops.length > 0 && <span className="rounded-full bg-[#173b64] px-2.5 py-1 text-xs font-bold text-white">{sheet.stops.length} stops</span>}
@@ -1816,9 +1840,9 @@ export function TripApp() {
               Read the text
             </Button>
             {!reviewTrip && (
-              <Button type="button" variant="outline" className="h-9 flex-1 text-sm" onClick={() => applyText(EXAMPLE_SHEET_TEXT)}>
-                Load a fake example
-              </Button>
+              <button type="button" className="h-9 shrink-0 px-2 text-xs font-medium text-[#53627a] underline underline-offset-2" onClick={() => applyText(EXAMPLE_SHEET_TEXT)}>
+                Try a made-up example
+              </button>
             )}
           </div>
           </Tucked>
@@ -1855,6 +1879,7 @@ export function TripApp() {
           )}
           {sheet.stops.length > 0 && (
               <div className="space-y-1.5">
+              <p className="text-xs font-semibold text-[#68758a]">Route, run and description</p>
               <div className="grid grid-cols-2 gap-2">
                 <Input className="h-9 bg-white text-sm" value={sheet.route} placeholder="Route" aria-label="Route" onChange={(e) => setSheet({ ...sheet, route: e.target.value })} />
                 <Input className="h-9 bg-white text-sm" value={sheet.run} placeholder="Run" aria-label="Run" onChange={(e) => setSheet({ ...sheet, run: e.target.value })} />
@@ -1875,11 +1900,12 @@ export function TripApp() {
                       <p className="rounded-full bg-[#e9eff7] px-2.5 py-1 text-xs font-bold tracking-wide text-[#0f2744]">STOP {si + 1}</p>
                       <button
                         type="button"
-                        className="h-9 touch-manipulation rounded-lg border border-[#efd6d2] bg-[#fff8f6] px-2.5 text-sm font-medium text-[#8f2c1c]"
+                        className="flex h-9 w-9 touch-manipulation items-center justify-center rounded-lg text-[#8f2c1c] hover:bg-[#fbeaea]"
                         aria-label={`Delete stop ${si + 1}`}
+                        title="Delete stop (you can undo)"
                         onClick={() => deleteStop(si)}
                       >
-                        Delete
+                        <Trash2 className="h-4 w-4" aria-hidden />
                       </button>
                     </div>
                     <div className="flex items-end gap-2">
@@ -2084,7 +2110,7 @@ export function TripApp() {
           <div className="fixed inset-x-0 bottom-0 z-[1200] border-t border-[#dce3ec] bg-white p-3 shadow-[0_-8px_28px_rgba(24,39,62,0.12)]">
             <div className="mx-auto flex max-w-2xl flex-col gap-2">
               {routeBuilding ? <RouteBuildStatus message={status} /> : status && <p className="text-sm font-medium">{status}</p>}
-              {error && <p className="text-sm text-[#7f1d1d]">{error}</p>}
+              {error && <p className="text-sm text-[#7f1d1d]" role="alert">{error}</p>}
               <div className="flex gap-2">
                 <Button type="button" variant="outline" className="h-11 flex-1 rounded-xl border-[#dce3ec] bg-[#f8fafc] text-sm font-semibold" onClick={saveDraftAndBack}>
                   {reviewTrip ? "Back to trips" : draftActive && (sheet.stops.length > 0 || text.trim()) ? "Save draft & back" : "Back"}
@@ -2111,7 +2137,6 @@ export function TripApp() {
           <p className="rounded-xl border border-[#f0d28d] bg-[#fff9ea] px-3 py-2.5 text-sm leading-relaxed text-[#463716]">
             Check this track before driving. One-way directions and bus restrictions may be missing from map data; turnaround points are estimates. Follow the trip sheet and road signs.
           </p>
-          {renderWarnings()}
           <div className="relative overflow-hidden rounded-2xl border border-[#dce3ec] bg-white p-1.5 shadow-[0_5px_18px_rgba(24,39,62,0.1)]" data-route-map>
             <RouteMap
               coords={route.coords}
@@ -2151,6 +2176,12 @@ export function TripApp() {
               </div>
             )}
           </div>
+          {tapMode === null && (
+            <Button type="button" variant="outline" className="h-10 self-start bg-white px-3 text-sm" disabled={routeBuilding} onClick={() => { setTapMode("via"); setMapFixContext(null); }}>
+              Add a point the route must pass
+            </Button>
+          )}
+          {renderWarnings()}
           <details open className="rounded-2xl border border-[#dce3ec] bg-white p-3 shadow-sm">
             <summary className="cursor-pointer text-sm font-bold">Stops and turns <span className="ml-1 rounded-full bg-[#edf3fa] px-2 py-0.5 text-xs text-[#315d8c]">{sheet.stops.length}</span></summary>
             <ol className="mt-3 space-y-2.5">
@@ -2271,12 +2302,6 @@ export function TripApp() {
           <div className="fixed inset-x-0 bottom-0 z-[1200] border-t border-[#dce3ec] bg-white p-3 shadow-[0_-8px_28px_rgba(24,39,62,0.12)]">
             <div className="mx-auto flex max-w-2xl flex-col gap-2">
               {routeBuilding && <RouteBuildStatus message={status} />}
-              {route.warnings.some((warning) => warning.level === "warn") && (
-                <label className={`flex cursor-pointer items-center gap-2 rounded-lg border px-2.5 py-2 text-xs ${warningAcknowledged ? "border-[#b8d6bf] bg-[#f0f8f2] text-[#245b34]" : "border-[#e5bd77] bg-[#fff8e9] text-[#59451f]"}`}>
-                  <input type="checkbox" className="h-4 w-4 shrink-0 accent-[#173b64]" checked={warningAcknowledged} onChange={(e) => setWarningAcknowledged(e.target.checked)} />
-                  <span><strong>{warningAcknowledged ? "Warnings acknowledged." : `Review ${route.warnings.filter((warning) => warning.level === "warn").length} warning${route.warnings.filter((warning) => warning.level === "warn").length === 1 ? "" : "s"}.`}</strong><span className="ml-1">{warningAcknowledged ? "GPX export is enabled." : "Check this after reviewing to enable export."}</span></span>
-                </label>
-              )}
               {tapMode !== null ? (
                 <Button
                   type="button"
@@ -2288,14 +2313,6 @@ export function TripApp() {
                 </Button>
               ) : (
                 <>
-                  <Button
-                    type="button"
-                    className="h-11 rounded-xl bg-[#173b64] text-sm font-bold text-white shadow-sm"
-                    disabled={routeBuilding}
-                    onClick={() => { setTapMode("via"); setMapFixContext(null); }}
-                  >
-                    Add a point on map
-                  </Button>
                   {editingLockedRun ? (
                     <div className="rounded-lg border border-[#abd0b5] bg-[#f0f8f2] p-2 text-xs leading-relaxed text-[#245b34]">
                       <p>This saved GPX is protected. To replace it, return to today’s list, unlock it, then reopen it.</p>
@@ -2304,22 +2321,16 @@ export function TripApp() {
                       </Button>
                     </div>
                   ) : (
-                    <Button type="button" className="h-11 rounded-xl bg-[#173b64] text-sm font-bold text-white shadow-sm" disabled={routeBuilding || !!status || (route.warnings.some((w) => w.level === "warn") && !warningAcknowledged)} onClick={saveToDay}>
-                      {route.warnings.some((w) => w.level === "warn") ? warningAcknowledged ? "Add reviewed route to today’s list" : "Review warnings to add route" : "Add to today’s list"}
+                    <Button type="button" className="h-11 rounded-xl bg-[#173b64] text-sm font-bold text-white shadow-sm" disabled={routeBuilding || !!status} onClick={saveToDay}>
+                      Add to today’s list
                     </Button>
                   )}
                   <div className="grid grid-cols-2 gap-2">
                     <Button type="button" variant="outline" className="h-12" onClick={() => setView("edit")}>
                       Edit directions
                     </Button>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      className="h-12"
-                      disabled={routeBuilding || !!status || (route.warnings.some((w) => w.level === "warn") && !warningAcknowledged)}
-                      onClick={shareCurrentRoute}
-                    >
-                      {route.warnings.some((w) => w.level === "warn") ? warningAcknowledged ? "Download reviewed GPX" : "Review warnings to download" : "Download GPX"}
+                    <Button type="button" variant="outline" className="h-12" disabled={routeBuilding || !!status} onClick={shareCurrentRoute}>
+                      Download GPX
                     </Button>
                   </div>
                 </>
@@ -2501,7 +2512,8 @@ function StreetMark({ state, open, onTap }: { state: string; open: boolean; onTa
     );
   }
   if (state === "checking") {
-    return <span className="mx-auto flex h-7 w-7 items-center justify-center rounded-full bg-[#f0f2f4] text-xs text-[#657084]" aria-label="Checking the street">…</span>;
+    // Names are checked once the map for the area has loaded.
+    return <span className="mx-auto flex h-7 w-7 items-center justify-center" title="Checked when the map loads" aria-label="Checked when the map loads"><span className="h-2.5 w-2.5 rounded-full bg-[#cfd6df]" /></span>;
   }
   return <span className="w-9" aria-hidden />;
 }
