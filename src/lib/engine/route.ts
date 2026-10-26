@@ -182,6 +182,7 @@ function meetingPairs(sheet: Sheet, available: Set<string>, places: RawPlace[]):
   const flat = flattenManeuvers(sheet);
   let prev = "";
   for (const f of flat) {
+    if (f.maneuver.kind === "proceed" && isRoundabout(f.maneuver.street)) continue;
     const key = resolveTarget(f.maneuver.street, available, places).key;
     if (prev) add(prev, key);
     prev = key;
@@ -697,6 +698,11 @@ export type Router = (points: LonLat[]) => Promise<LonLat[] | null>;
 
 const JUMP_NOTE = "Couldn't connect";
 
+/** A roundabout named only as such on the sheet, not a street. */
+export function isRoundabout(street: string): boolean {
+  return /^(?:the\s+)?(?:roundabout|traffic\s+circle|rotary)$/i.test(street.trim());
+}
+
 async function routeFrom(
   graph: Graph,
   sheet: Sheet,
@@ -822,6 +828,12 @@ async function routeFrom(
 
   for (let i = 0; i < flat.length; i++) {
     const { stopIndex, maneuverIndex, maneuver } = flat[i];
+    if (maneuver.kind === "proceed" && isRoundabout(maneuver.street)) {
+      // "Proceed Onto ROUNDABOUT": drive through it. The next line names the
+      // street to leave on, so there is no road called ROUNDABOUT to find.
+      legs.push({ stopIndex, maneuverIndex, kind: "proceed", street: maneuver.street, meters: 0 });
+      continue;
+    }
     const before = polylineMeters(coords);
     const target = resolveTarget(maneuver.street, available, places);
     if (target.how === "missing") {
@@ -1362,5 +1374,30 @@ export async function routeSheet(
       }. Check the start.`,
     });
   }
+  best.warnings.push(...loadWarnings(sheet));
   return best;
+}
+
+/**
+ * Run Ld is the running total of Stop Load: it rises by each pickup (or falls
+ * by each drop-off) and is 0 at a school. A total that doesn't follow means a
+ * stop is missing between the two, or a number was misread. A note only: OCR
+ * misreads digits often enough that this can't block an export.
+ */
+export function loadWarnings(sheet: Sheet): Warning[] {
+  const out: Warning[] = [];
+  for (let k = 1; k < sheet.stops.length; k++) {
+    const prev = sheet.stops[k - 1].runLoad;
+    const { stopLoad, runLoad, description } = sheet.stops[k];
+    if (prev == null || stopLoad == null || runLoad == null) continue;
+    const follows = runLoad === prev + stopLoad || runLoad === prev - stopLoad || (runLoad === 0 && stopLoad === 0);
+    if (follows) continue;
+    out.push({
+      level: "info",
+      stopIndex: k,
+      maneuverIndex: -1,
+      message: `Load numbers don't add up at stop ${k + 1} (${description}): run load ${prev} → ${runLoad} with stop load ${stopLoad}. A stop may be missing before it, or a number was misread. Check against the sheet.`,
+    });
+  }
+  return out;
 }
