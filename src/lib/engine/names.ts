@@ -32,6 +32,24 @@ const SUFFIX: Record<string, string> = {
   hwy: "hwy",
 };
 
+const DIRECTION_WORD: Record<string, string> = {
+  north: "n", south: "s", east: "e", west: "w",
+  northeast: "ne", northwest: "nw", southeast: "se", southwest: "sw",
+};
+const DIRECTION_KEY = new Set(Object.values(DIRECTION_WORD));
+
+/**
+ * A street key without its leading or trailing direction ("se maynard rd" →
+ * "maynard rd"), for sheets that drop the prefix the map keeps, or the other
+ * way round. Returns the key unchanged when nothing is left but a suffix.
+ */
+export function withoutDirection(key: string): string {
+  const parts = key.split(" ");
+  if (parts.length > 2 && DIRECTION_KEY.has(parts[0])) parts.shift();
+  if (parts.length > 2 && DIRECTION_KEY.has(parts[parts.length - 1])) parts.pop();
+  return parts.join(" ");
+}
+
 /** Stable street key: "Morgan Street" and "MORGAN ST" both become "morgan st". */
 export function canonicalKey(raw: string): string {
   let s = raw
@@ -48,8 +66,12 @@ export function canonicalKey(raw: string): string {
     return `${prefix} ${route[2]}`;
   }
   const parts = s.split(" ").filter(Boolean);
-  if (parts.length && SUFFIX[parts[parts.length - 1]]) {
-    parts[parts.length - 1] = SUFFIX[parts[parts.length - 1]];
+  // "Southeast Maynard Road" and "SE MAYNARD RD" are one street.
+  if (parts.length > 1 && DIRECTION_WORD[parts[0]]) parts[0] = DIRECTION_WORD[parts[0]];
+  if (parts.length > 1 && DIRECTION_WORD[parts[parts.length - 1]]) parts[parts.length - 1] = DIRECTION_WORD[parts[parts.length - 1]];
+  const last = parts.length > 1 && DIRECTION_KEY.has(parts[parts.length - 1]) ? parts.length - 2 : parts.length - 1;
+  if (last >= 0 && SUFFIX[parts[last]]) {
+    parts[last] = SUFFIX[parts[last]];
   }
   return parts.join(" ");
 }
