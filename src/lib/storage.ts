@@ -17,7 +17,7 @@ export type SavedRun = {
   gpx: string;
   coords: LonLat[];
   stops: DayStop[];
-  warnings: { level: "info" | "warn"; message: string; stopIndex?: number; maneuverIndex?: number }[];
+  warnings: { level: "info" | "warn"; message: string; stopIndex?: number; maneuverIndex?: number; /** Map spot for route-geometry warnings. */ location?: LonLat }[];
   /** The driver explicitly reviewed the route warnings before saving/exporting it. */
   warningsAcknowledged?: boolean;
   /** Protect this saved track from accidental removal or replacement. */

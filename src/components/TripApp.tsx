@@ -1212,6 +1212,23 @@ export function TripApp() {
     setRuns((prev) => prev.filter((item) => item.id !== run.id));
   }
 
+  /** The driver has looked at a run's warnings (or takes them back). */
+  function setRunChecked(id: string, checked: boolean) {
+    setRuns((prev) => prev.map((run) => (run.id === id ? { ...run, warningsAcknowledged: checked } : run)));
+  }
+
+  /** Download one run. Unchecked warnings are listed and confirmed first, not routed through the editor. */
+  function downloadRun(run: SavedRun, index: number) {
+    const open = !run.warningsAcknowledged ? run.warnings.filter((w) => w.level === "warn") : [];
+    if (open.length) {
+      const list = open.slice(0, 4).map((w) => `• ${w.message}`).join("\n");
+      const more = open.length > 4 ? `\n…and ${open.length - 4} more.` : "";
+      if (!window.confirm(`This run has ${open.length} warning${open.length === 1 ? "" : "s"} to check:\n\n${list}${more}\n\nMark them checked and download the GPX?`)) return;
+      setRunChecked(run.id, true);
+    }
+    void deliverGpx([{ name: runFileName(index, run), text: run.gpx }], runFileName(index, run), "single");
+  }
+
   /** Clear the day's list. Protected runs stay; remove those one at a time. */
   function removeAllRuns() {
     if (exportLock.current || !runs.length) return;
@@ -1230,7 +1247,7 @@ export function TripApp() {
     const first = unreviewedRuns[0];
     if (!first) return true;
     const label = [first.route, first.run].filter(Boolean).join(" ") || "the highlighted run";
-    setError(`Review and acknowledge the route warning on ${label} before exporting today’s GPX files.`);
+    setError(`Check the warnings on ${label}, then tap “I’ve checked these” on its card.`);
     requestAnimationFrame(() => {
       document.querySelector<HTMLElement>(`[data-warning-run="${first.id}"]`)?.scrollIntoView({ behavior: "smooth", block: "center" });
     });
@@ -1449,10 +1466,10 @@ export function TripApp() {
           )}
           {unreviewedRuns.length > 0 && (
             <div className="rounded-xl border border-[#e5bd77] bg-[#fff8e9] p-3 text-sm text-[#59451f]" role="alert">
-              <p className="font-semibold">Review {unreviewedRuns.length} run{unreviewedRuns.length === 1 ? "" : "s"} before exporting.</p>
-              <p className="mt-1 text-xs leading-relaxed">Every route warning must be acknowledged on its run. Batch GPX export is paused until then.</p>
-              <Button type="button" variant="outline" className="mt-2 h-8 bg-white px-2.5 text-xs font-semibold" onClick={() => openEdit(unreviewedRuns[0])} disabled={exportingDay}>
-                Review {unreviewedRuns[0].route || "run"} {unreviewedRuns[0].run}
+              <p className="font-semibold">Check the warnings on {unreviewedRuns.length} run{unreviewedRuns.length === 1 ? "" : "s"} before exporting the day.</p>
+              <p className="mt-1 text-xs leading-relaxed">Read each run’s warnings (Show on map helps), then tap “I’ve checked these” on its card.</p>
+              <Button type="button" variant="outline" className="mt-2 h-8 bg-white px-2.5 text-xs font-semibold" onClick={() => allowBatchExport()} disabled={exportingDay}>
+                Go to {unreviewedRuns[0].route || "run"} {unreviewedRuns[0].run}
               </Button>
             </div>
           )}
@@ -1487,7 +1504,7 @@ export function TripApp() {
                   <div className="flex flex-wrap items-center gap-1.5">
                     <h2 className="text-lg font-bold leading-tight tracking-tight">{run.route || "Route"} {run.run && <span className="font-semibold text-[#53627a]">{run.run}</span>}</h2>
                     {run.locked && <span className="rounded-full bg-[#e7f3eb] px-2 py-0.5 text-[0.68rem] font-bold text-[#216338]">Protected</span>}
-                    {!warnings.length && <span className="rounded-full bg-[#e7f3eb] px-2 py-0.5 text-[0.68rem] font-bold text-[#216338]">Ready to review</span>}
+                    {(!warnings.length || run.warningsAcknowledged) && <span className="rounded-full bg-[#e7f3eb] px-2 py-0.5 text-[0.68rem] font-bold text-[#216338]">Ready</span>}
                   </div>
                   <p className="mt-0.5 truncate text-sm font-medium text-[#46546a]">{run.description || "Untitled sheet"}</p>
                   <p className="mt-1 text-xs font-medium text-[#68758a]">{run.firstTime} <span className="px-1 text-[#a5afbd]">·</span> {run.miles.toFixed(2)} miles</p>
@@ -1506,16 +1523,26 @@ export function TripApp() {
               {warnings.length > 0 && (
                 <div className={`mt-3 rounded-xl border border-[#f0d28d] border-l-4 border-l-[#d28b16] p-3 ${run.warningsAcknowledged ? "bg-[#fffdf5]" : "bg-[#fff9ea]"}`} role={run.warningsAcknowledged ? "status" : "alert"}>
                   <p className="text-xs font-bold uppercase tracking-wide text-[#80540b]">{run.warningsAcknowledged ? `Reviewed · ${warnings.length} warning${warnings.length === 1 ? "" : "s"} still on route` : `Needs a quick check · ${warnings.length} ${warnings.length === 1 ? "warning" : "warnings"}`}</p>
-                  <p className="mt-1 text-sm leading-relaxed text-[#463716]">{warnings[0].message}</p>
-                  {warnings.length > 1 && (
-                    <details className="mt-1 text-sm">
-                      <summary className="cursor-pointer font-medium">Show {warnings.length - 1} more</summary>
-                      <ul className="mt-1 list-disc space-y-1 pl-5">
-                        {warnings.slice(1).map((warning, n) => <li key={n}>{warning.message}</li>)}
-                      </ul>
-                    </details>
-                  )}
-                  <Button type="button" variant="outline" className="mt-2 h-9 border-[#e5c981] bg-white px-3 text-sm font-semibold text-[#68470b]" onClick={() => openEdit(run)} disabled={exportingDay}>{run.warningsAcknowledged ? "Recheck route" : "Review warnings"}</Button>
+                  <ul className="mt-1.5 list-disc space-y-1 pl-5 text-sm leading-relaxed text-[#463716]">
+                    {warnings.map((warning, n) => <li key={n}>{warning.message}</li>)}
+                  </ul>
+                  <div className="mt-2.5 flex flex-wrap gap-2">
+                    {run.warningsAcknowledged ? (
+                      <Button type="button" variant="outline" className="h-9 border-[#e5c981] bg-white px-3 text-sm font-semibold text-[#68470b]" onClick={() => setRunChecked(run.id, false)} disabled={exportingDay}>
+                        Undo checked
+                      </Button>
+                    ) : (
+                      <Button type="button" className="h-9 bg-[#173b64] px-3 text-sm font-semibold text-white" onClick={() => setRunChecked(run.id, true)} disabled={exportingDay}>
+                        I’ve checked these
+                      </Button>
+                    )}
+                    <Button type="button" variant="outline" className="h-9 border-[#e5c981] bg-white px-3 text-sm font-semibold text-[#68470b]" onClick={() => setMapRun(mapRun === run.id ? null : run.id)} disabled={run.coords.length < 2}>
+                      {mapRun === run.id ? "Hide map" : "Show on map"}
+                    </Button>
+                    <Button type="button" variant="outline" className="h-9 border-[#e5c981] bg-white px-3 text-sm font-semibold text-[#68470b]" onClick={() => openEdit(run)} disabled={exportingDay}>
+                      Fix in editor
+                    </Button>
+                  </div>
                 </div>
               )}
               {lacksTurnPoints(run.gpx) && (
@@ -1536,8 +1563,13 @@ export function TripApp() {
                     turnarounds={[]}
                     vias={run.vias ?? []}
                     turns={turnPinsFromGpx(run.gpx)}
+                    warningStops={warnings.flatMap((w) => {
+                      if (w.location) return [{ lat: w.location[1], lon: w.location[0], label: w.message }];
+                      const stop = typeof w.stopIndex === "number" ? run.stops[w.stopIndex] : undefined;
+                      return stop ? [{ lat: stop.lat, lon: stop.lon, label: w.message }] : [];
+                    })}
                   />
-                  <p className="mt-1 text-sm text-[#3d4b63]">Blue dots are via points. The dark line bends through each one, then returns to the printed streets.</p>
+                  <p className="mt-1 text-sm text-[#3d4b63]">Red circles mark warnings. L, R and U pins are the turns (amber: not confirmed). Blue dots are via points.</p>
                 </div>
               )}
               <div className="mt-3 grid grid-cols-3 gap-1.5 border-t border-[#edf0f4] pt-2.5">
@@ -1547,8 +1579,8 @@ export function TripApp() {
                 <Button type="button" variant="outline" className="h-9 border-[#dce3ed] bg-[#f8fafc] text-xs font-semibold text-[#34445c]" onClick={() => openEdit(run)} disabled={exportingDay}>
                   Edit
                 </Button>
-                <Button type="button" variant="outline" className="h-9 border-[#dce3ed] bg-[#f8fafc] text-xs font-semibold text-[#34445c]" onClick={() => warnings.length && !run.warningsAcknowledged ? openEdit(run) : void deliverGpx([{ name: runFileName(i, run), text: run.gpx }], runFileName(i, run), "single")}>
-                  {warnings.length && !run.warningsAcknowledged ? "Review warnings" : warnings.length ? "Download reviewed GPX" : "Download GPX"}
+                <Button type="button" variant="outline" className="h-9 border-[#dce3ed] bg-[#f8fafc] text-xs font-semibold text-[#34445c]" onClick={() => downloadRun(run, i)}>
+                  Download GPX
                 </Button>
               </div>
               <details className="mt-2 border-t border-[#edf0f4] pt-2">
