@@ -72,6 +72,17 @@ function turnIcon(pin: TurnPin) {
   });
 }
 
+/** An amber turnaround pin that can be picked up and dropped where the bus turns around. */
+function turnaroundIcon(selected: boolean) {
+  const size = selected ? 26 : 22;
+  return L.divIcon({
+    className: "turnaround-pin",
+    html: `<div style="width:${size}px;height:${size}px;border-radius:999px;background:#f59e0b;border:3px solid #9a3412;box-shadow:0 1px 4px rgba(0,0,0,.45);cursor:grab"></div>`,
+    iconSize: [size, size],
+    iconAnchor: [size / 2, size / 2],
+  });
+}
+
 export default function RouteMap({
   coords,
   stops,
@@ -85,6 +96,7 @@ export default function RouteMap({
   selectedTurnaround,
   picking = false,
   onMapClick,
+  onMoveTurnaround,
 }: {
   coords: LonLat[];
   stops: StopPin[];
@@ -100,6 +112,8 @@ export default function RouteMap({
   /** The next tap should add a via, so the map takes the touch instead of the page. */
   picking?: boolean;
   onMapClick?: (lat: number, lon: number) => void;
+  /** When set, turnaround pins can be dragged; called where one is dropped. */
+  onMoveTurnaround?: (id: string, lat: number, lon: number) => void;
 }) {
   const center: [number, number] = coords.length
     ? [coords[Math.floor(coords.length / 2)][1], coords[Math.floor(coords.length / 2)][0]]
@@ -139,7 +153,22 @@ export default function RouteMap({
           pathOptions={{ color: "#1e3a8a", fillColor: "#2563eb", fillOpacity: 0.95, weight: 2 }}
         />
       ))}
-      {turnarounds.map((t) => (
+      {onMoveTurnaround && turnarounds.map((t) => (
+        <Marker
+          key={`${t.id}-${t.lat}-${t.lon}`}
+          position={[t.lat, t.lon]}
+          icon={turnaroundIcon(t.id === selectedTurnaround)}
+          draggable
+          title={`Turnaround on ${t.street}: drag to where the bus turns around`}
+          eventHandlers={{
+            dragend: (e) => {
+              const at = (e.target as L.Marker).getLatLng();
+              onMoveTurnaround(t.id, at.lat, at.lng);
+            },
+          }}
+        />
+      ))}
+      {!onMoveTurnaround && turnarounds.map((t) => (
         <CircleMarker
           key={t.id}
           center={[t.lat, t.lon]}
