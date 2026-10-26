@@ -91,3 +91,28 @@ export function normalizeSheetOcr(headerRaw: string, bodyRaw: string): string {
   }
   return result.join("\n");
 }
+
+const LOAD_ROW = /^\W*(\d{1,3})\s+(\d{1,3})(?:\s+([0-9@][0-9A-Za-z]{2}\.[0-9A-Za-z]{3}))?\W*$/;
+
+/**
+ * Join the Stop Load / Run Ld / Stop ID column, read on its own, to the stop
+ * lines. Each stop has one row, so more rows than stop lines means stops were
+ * missed. Rows are joined only when the counts match, so a number can't land
+ * on the wrong stop.
+ */
+export function mergeLoadColumn(text: string, columnRaw: string): { text: string; missingStops: number } {
+  const rows = columnRaw
+    .split("\n")
+    .map((line) => line.trim().match(LOAD_ROW))
+    .filter((m): m is RegExpMatchArray => !!m);
+  const lines = text.split("\n");
+  const stopLines = lines.flatMap((line, i) => (TIME.test(line) ? [i] : []));
+  const missingStops = Math.max(0, rows.length - stopLines.length);
+  if (rows.length && rows.length === stopLines.length) {
+    stopLines.forEach((at, k) => {
+      const [, stopLoad, runLoad, id] = rows[k];
+      if (id && !/\d{1,3}\s+\d{1,3}\s+\S+\.\S{3}\s*$/.test(lines[at])) lines[at] = `${lines[at]} ${stopLoad} ${runLoad} ${id}`;
+    });
+  }
+  return { text: lines.join("\n"), missingStops };
+}
