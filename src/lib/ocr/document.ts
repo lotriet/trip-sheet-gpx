@@ -1,6 +1,7 @@
 /** Turn OCR's page text into the route fields the sheet actually prints. */
 
 const TIME = /^\W*\d{1,2}\s*:\s*\d{2}\s*[AP]M\b/i;
+const BARE_TIME = /^\W*\d{1,2}\s*:\s*\d{2}\s*[AP]M\s*$/i;
 const DIRECTION = /^\W*(?:proceed|procead|continue|right|left|rt\b|lt\b|turn\s*around|tum\s*around|u[\s-]?turn)\b/i;
 
 function headerField(text: string, label: string): string {
@@ -9,7 +10,8 @@ function headerField(text: string, label: string): string {
 }
 
 function usableDescription(value: string): string {
-  const cleaned = value.replace(/\s+Run\s*:.*$/i, "").trim();
+  // The Run field can bleed onto the description line, with or without its colon.
+  const cleaned = value.replace(/\s+Run\s*:.*$/i, "").replace(/\s+Run\s*$/i, "").trim();
   const letters = cleaned.match(/[A-Za-z]/g)?.length ?? 0;
   return letters < 4 || !/^[A-Z0-9]/i.test(cleaned) || /driver directions|according to TIMS|confidential/i.test(cleaned) ? "" : cleaned;
 }
@@ -35,6 +37,9 @@ function cleanContent(line: string): string {
   return line
     .replace(/\bProcead\b/gi, "Proceed")
     .replace(/\bTu[mnr]\b/gi, "Turn")
+    // Common misreads of the two turn words at the start of a direction.
+    .replace(/^(\W*)Le[ftl][tfl1i]\b/i, "$1Left")
+    .replace(/^(\W*)R[il1][gq]h?[nhr]t\b/i, "$1Right")
     .replace(/\bPK\s+WY\b/gi, "PKWY")
     .replace(/\s+/g, " ")
     .trim();
@@ -69,6 +74,12 @@ export function normalizeSheetOcr(headerRaw: string, bodyRaw: string): string {
       started = true;
       previousWasContent = true;
       result.push(line);
+      continue;
+    }
+    // A stop line read as just its time: the description came out as its own
+    // line ("Deadhead - SCHOOL: OAK HS" is mixed case, so canContinue misses it).
+    if (started && previousWasContent && BARE_TIME.test(result[result.length - 1]) && /[A-Za-z]{3,}/.test(line)) {
+      result[result.length - 1] += ` ${line}`;
       continue;
     }
     // A long stop or street name sometimes wraps onto a second printed line.
