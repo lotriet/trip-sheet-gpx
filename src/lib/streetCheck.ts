@@ -4,7 +4,7 @@
  * ("MAPLEW OOD MILL RD" -> "MAPLEWOOD MILL RD"). Pure, so it can be tested.
  */
 
-import { canonicalKey, expandPlaceQuery, looksLikePlace } from "./engine/names";
+import { canonicalKey, expandPlaceQuery, looksLikePlace, withoutDirection } from "./engine/names";
 import { classifyLocation } from "./engine/parseSheet";
 import { matchPlace } from "./engine/route";
 import type { RawLine, RawPlace } from "./engine/types";
@@ -88,6 +88,13 @@ export function looseName(index: StreetIndex, raw: string): string | null {
   const sq = key.replace(/\s+/g, "");
   const exact = index.names.find((n) => n.squash === sq);
   if (exact) return canonicalKey(exact.display) === key ? null : exact.display;
+  // The same order the route builder uses, so a green mark always routes:
+  // a direction variant first, and several variants are not guessed.
+  const bare = withoutDirection(key);
+  const directed = index.names.filter((n) => canonicalKey(n.display) !== key && withoutDirection(canonicalKey(n.display)) === bare);
+  const distinct = [...new Set(directed.map((n) => canonicalKey(n.display)))];
+  if (distinct.length === 1) return directed[0].display;
+  if (distinct.length > 1) return null;
   const st = stem(key);
   if (!st) return null;
   const hits = index.names.filter((n) => stem(canonicalKey(n.display)) === st);

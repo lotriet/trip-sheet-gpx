@@ -11,7 +11,7 @@ import {
   turnAngle,
 } from "./geo";
 import { buildGraph, edgeHas, edgeServes, keysInGraph, nodeHas, type Graph, type GraphEdge, type GraphLine, type GraphNode } from "./graph";
-import { canonicalKey, looksLikePlace, sameSchool, schoolSig } from "./names";
+import { canonicalKey, looksLikePlace, sameSchool, schoolSig, withoutDirection } from "./names";
 import { classifyLocation, flattenManeuvers } from "./parseSheet";
 import type {
   LonLat,
@@ -219,16 +219,20 @@ function meetingPairs(sheet: Sheet, available: Set<string>, places: RawPlace[]):
     if (!out.has(id)) out.set(id, [a, b]);
   };
   const flat = flattenManeuvers(sheet);
-  let prev = "";
+  // A bare name with several direction variants pairs with each of them.
+  const addAll = (as: string[], bs: string[]) => {
+    for (const a of as.slice(0, 4)) for (const b of bs.slice(0, 4)) add(a, b);
+  };
+  let prev: string[] = [];
   for (const f of flat) {
     if (f.maneuver.kind === "proceed" && isRoundabout(f.maneuver.street)) continue;
-    const key = resolveTarget(f.maneuver.street, available, places).key;
-    if (prev) add(prev, key);
-    prev = key;
+    const keys = candidateKeys(f.maneuver.street, available, places);
+    addAll(prev, keys);
+    prev = keys;
   }
   for (const stop of sheet.stops) {
     const loc = classifyLocation(stop.description);
-    if (loc.kind === "intersection") add(resolveTarget(loc.a, available, places).key, resolveTarget(loc.b, available, places).key);
+    if (loc.kind === "intersection") addAll(candidateKeys(loc.a, available, places), candidateKeys(loc.b, available, places));
   }
   return [...out.values()];
 }
@@ -280,6 +284,8 @@ function resolveTarget(
   raw: string,
   available: Set<string>,
   places: RawPlace[],
+  /** Chooses among several direction variants ("nw cary pkwy", "se cary pkwy"); null when none fits. */
+  pick?: (keys: string[]) => string | null,
 ): { key: string; label: string; how: "street" | "place" | "loose" | "missing" } {
   if (looksLikePlace(raw)) {
     const p = matchPlace(raw, places);
@@ -292,6 +298,17 @@ function resolveTarget(
   }
   const key = canonicalKey(raw);
   if (available.has(key)) return { key, label: raw, how: "street" };
+  // The sheet drops (or adds) the map's direction: "CARY PKWY" for Southeast
+  // Cary Parkway. This comes before the looser suffix match below, which would
+  // take a different street ("Cary St"). Several variants (NW, SW, SE Cary
+  // Pkwy) are settled by [pick], or left unmatched rather than guessed.
+  const bare = withoutDirection(key);
+  const directed = [...available].filter((a) => !a.startsWith("place:") && a !== key && withoutDirection(a) === bare);
+  if (directed.length === 1) return { key: directed[0], label: raw, how: "loose" };
+  if (directed.length > 1) {
+    const chosen = pick?.(directed);
+    return chosen ? { key: chosen, label: raw, how: "loose" } : { key, label: raw, how: "missing" };
+  }
   const strip = (k: string) => k.split(" ").slice(0, -1).join(" ");
   const suffix = new Set(["st", "rd", "dr", "ln", "ct", "ave", "blvd", "pkwy", "cir", "pl", "trl", "ter", "way", "hwy", "xing"]);
   const hits = [...available].filter((a) => {
@@ -308,6 +325,23 @@ function resolveTarget(
   const joined = [...available].filter((a) => !a.startsWith("place:") && a.replace(/\s+/g, "") === squashed);
   if (joined.length === 1) return { key: joined[0], label: raw, how: "loose" };
   return { key, label: raw, how: "missing" };
+}
+
+/** Every key a sheet name may mean: one when it resolves, else each direction variant. */
+function candidateKeys(raw: string, available: Set<string>, places: RawPlace[]): string[] {
+  const resolved = resolveTarget(raw, available, places);
+  if (resolved.how !== "missing") return [resolved.key];
+  const bare = withoutDirection(resolved.key);
+  const directed = [...available].filter((a) => !a.startsWith("place:") && withoutDirection(a) === bare);
+  return directed.length ? directed : [resolved.key];
+}
+
+/** The two streets of an intersection stop, choosing the direction variants that actually meet. */
+function intersectionKeys(graph: Graph, a: string, b: string, available: Set<string>, places: RawPlace[]): [string, string] {
+  const as = candidateKeys(a, available, places);
+  const bs = candidateKeys(b, available, places);
+  for (const ka of as) for (const kb of bs) if (intersectionNodes(graph, ka, kb).length) return [ka, kb];
+  return [as[0], bs[0]];
 }
 
 function reconstruct(
@@ -707,10 +741,21 @@ function chooseTurnaround(loops: TurnCandidate[], ends: TurnCandidate[], deep: b
   return dead ?? loops.sort((a, b) => a.dist - b.dist)[0] ?? null;
 }
 
+/**
+ * Nodes where streets [a] and [b] meet. A one-way street that only arrives at
+ * the corner still meets it, so incoming edges count as well as outgoing ones.
+ */
 function intersectionNodes(graph: Graph, a: string, b: string): GraphNode[] {
+  const arrives = (key: string) => {
+    const ids = new Set<string>();
+    for (const e of graph.edges) if (edgeServes(e, key)) ids.add(e.to);
+    return ids;
+  };
+  const inA = arrives(a);
+  const inB = arrives(b);
   const out: GraphNode[] = [];
   for (const n of graph.nodes.values()) {
-    if (nodeHas(n, a) && nodeHas(n, b)) out.push(n);
+    if ((nodeHas(n, a) || inA.has(n.id)) && (nodeHas(n, b) || inB.has(n.id))) out.push(n);
   }
   return out;
 }
@@ -874,7 +919,16 @@ async function routeFrom(
       continue;
     }
     const before = polylineMeters(coords);
-    const target = resolveTarget(maneuver.street, available, places);
+    // Of several direction variants, the one the bus is nearest to.
+    const target = resolveTarget(maneuver.street, available, places, (keys) => {
+      let best: { key: string; d: number } | null = null;
+      for (const k of keys) {
+        const n = nearestOn(k, node.coord);
+        const d = n ? haversine(n.coord, node.coord) : Infinity;
+        if (d < (best?.d ?? 3000)) best = { key: k, d };
+      }
+      return best?.key ?? null;
+    });
     if (target.how === "missing") {
       warn("warn", stopIndex, maneuverIndex, `Couldn't find “${maneuver.street}” in the map for this area.`);
     } else if (target.how === "loose") {
@@ -1266,8 +1320,7 @@ function placeStops(
         warnings.push({ level: "warn", stopIndex: index, maneuverIndex: -1, message: `Couldn't confirm the end-of-street location for stop “${stop.description}” on the route. Check this stop marker.` });
       }
     } else if (loc.kind === "intersection") {
-      const ka = resolveTarget(loc.a, available, places).key;
-      const kb = resolveTarget(loc.b, available, places).key;
+      const [ka, kb] = intersectionKeys(graph, loc.a, loc.b, available, places);
       const nodes = intersectionNodes(graph, ka, kb);
       let best: { at: number; coord: LonLat } | null = null;
       for (const n of nodes) {
@@ -1340,9 +1393,8 @@ export async function routeSheet(
     const stop = sheet.stops[k];
     const loc = classifyLocation(stop.description);
     if (loc.kind === "intersection") {
-      const a = resolveTarget(loc.a, available, data.places);
-      const b = resolveTarget(loc.b, available, data.places);
-      return intersectionNodes(graph, a.key, b.key);
+      const [ka, kb] = intersectionKeys(graph, loc.a, loc.b, available, data.places);
+      return intersectionNodes(graph, ka, kb);
     }
     const street =
       loc.kind === "end" || loc.kind === "street"
