@@ -52,7 +52,7 @@ export function prettySheetText(s: string): string {
     .join(" ");
 }
 
-function maneuverPhrase(kind: string, street: string): string {
+export function maneuverPhrase(kind: string, street: string): string {
   const name = prettySheetText(street);
   if (kind === "proceed") return `Proceed on ${name}`;
   if (kind === "left") return `Left on ${name}`;
