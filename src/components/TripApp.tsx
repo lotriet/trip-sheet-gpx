@@ -1579,14 +1579,21 @@ export function TripApp() {
                 Add a run
               </Button>
               <div className="grid grid-cols-2 gap-2">
-                <Button type="button" variant="outline" className="h-10 rounded-xl border-[#dce3ec] bg-[#f8fafc] text-xs font-semibold" disabled={!runs.length || exportingDay || unreviewedRuns.length > 0} title={unreviewedRuns.length ? "Review and acknowledge each run’s warnings first" : undefined} onClick={() => void exportDay()}>
+                <Button type="button" variant="outline" className="h-10 rounded-xl border-[#dce3ec] bg-[#f8fafc] text-xs font-semibold" disabled={!runs.length || exportingDay} aria-describedby={unreviewedRuns.length ? "export-needs-review" : undefined} onClick={() => void exportDay()}>
                   {exportingDay ? "Preparing GPX…" : "One GPX for the day"}
                 </Button>
-                <Button type="button" variant="outline" className="h-10 rounded-xl border-[#dce3ec] bg-[#f8fafc] text-xs font-semibold" disabled={!runs.length || exportingDay || unreviewedRuns.length > 0} title={unreviewedRuns.length ? "Review and acknowledge each run’s warnings first" : undefined} onClick={() => void shareAll()}>
+                <Button type="button" variant="outline" className="h-10 rounded-xl border-[#dce3ec] bg-[#f8fafc] text-xs font-semibold" disabled={!runs.length || exportingDay} aria-describedby={unreviewedRuns.length ? "export-needs-review" : undefined} onClick={() => void shareAll()}>
                   {exportingDay ? "Preparing GPX…" : canShare ? "Share all" : "Download all"}
                 </Button>
               </div>
-              <p className="text-center text-xs leading-relaxed text-[#3d4b63]">One GPX combines runs in this order. Share all sends a separate file for each run.</p>
+              {unreviewedRuns.length > 0 ? (
+                // Shown here, next to the buttons, because the list's own notice is off screen.
+                <p id="export-needs-review" className="text-center text-xs font-semibold leading-relaxed text-[#80540b]">
+                  Review warnings on {unreviewedRuns.map((run) => `run ${runs.indexOf(run) + 1}`).join(", ")} first. Tap a button to go there.
+                </p>
+              ) : (
+                <p className="text-center text-xs leading-relaxed text-[#3d4b63]">One GPX combines runs in this order. Share all sends a separate file for each run.</p>
+              )}
             </div>
           </div>
         </section>
