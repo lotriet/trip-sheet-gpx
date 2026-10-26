@@ -8,10 +8,10 @@
  * than passed on as gibberish.
  */
 
-import { crop, preparePage, resize, rgbaToGray, rotate, rotationCandidates, type Gray } from "./ocr/prep";
+import { crop, preparePage, prepareWholePhoto, resize, rgbaToGray, rotate, rotationCandidates, type Gray, type Prepared } from "./ocr/prep";
 import { normalizeSheetOcr } from "./ocr/document";
 import { judgeSheetText, RETAKE_MESSAGE } from "./ocr/quality";
-import type { PSM as PageSegmentationMode } from "tesseract.js";
+import type { ImageLike, PSM as PageSegmentationMode } from "tesseract.js";
 
 export type PhotoResult =
   | { ok: true; name: string; text: string; /** Small JPEG of the page as read, for telling pages apart. */ thumb?: string }
@@ -134,16 +134,41 @@ async function recognizeNatively(file: Blob): Promise<NativeOcrLine[] | null> {
 
 class PhotoError extends Error {}
 
-async function readOne(
+type PsmModes = { AUTO: PageSegmentationMode; SINGLE_BLOCK: PageSegmentationMode };
+
+/** Every page of a Driver Directions sheet ends with this footer. */
+const FOOTER = /report\s*name|driver\s*directions\s*-+\s*by\s*route|\bpage\s+\d+\s*$/im;
+
+async function readOne(worker: Worker, file: Blob, name: string, psmModes: PsmModes): Promise<PhotoResult> {
+  const read = await readGray(worker, await decodeToGray(file), psmModes);
+  if (!read) return { ok: false, name, reason: RETAKE_MESSAGE };
+  return { ok: true, name, text: read.text, thumb: thumbnail(read.page) };
+}
+
+/**
+ * OCR a decoded photo. When the cropped page never reaches the sheet's
+ * footer, the crop may have cut the paper at a fold or shadow, silently
+ * dropping stops and turns; the whole photo is read too and the read with
+ * more of the sheet wins.
+ */
+export async function readGray(
   worker: Worker,
-  file: Blob,
-  name: string,
-  psmModes: { AUTO: PageSegmentationMode; SINGLE_BLOCK: PageSegmentationMode },
-): Promise<PhotoResult> {
-  const gray = await decodeToGray(file);
+  gray: Gray,
+  psmModes: PsmModes,
+): Promise<{ text: string; page: Gray } | null> {
   const prepared = preparePage(gray);
+  let best = await readPrepared(worker, prepared, psmModes);
+  if (prepared.cropped && !best?.footer) {
+    const whole = await readPrepared(worker, prepareWholePhoto(gray), psmModes);
+    if (whole && (!best || whole.score > best.score)) best = whole;
+  }
+  if (!best?.ok) return null;
+  return { text: best.text, page: rotate(best.image, best.degrees) };
+}
+
+async function readPrepared(worker: Worker, prepared: Prepared, psmModes: PsmModes) {
   const candidates = rotationCandidates(prepared.landscape);
-  let best: { text: string; score: number; ok: boolean; directions: number; degrees: number } | null = null;
+  let best: { text: string; score: number; ok: boolean; directions: number; degrees: number; footer: boolean; image: Gray } | null = null;
   for (const degrees of candidates) {
     const page = rotate(prepared.image, degrees);
     const header = crop(page, { x: 0, y: 0, w: page.width, h: Math.max(1, Math.round(page.height * 0.15)) });
@@ -166,21 +191,24 @@ async function readOne(
       const bodyText = await readText(worker, body, psm);
       const text = normalizeSheetOcr(`${headerText}\n${runText}`, bodyText);
       const q = judgeSheetText(text);
-      if (!best || q.score > best.score) best = { text, score: q.score, ok: q.ok, directions: q.directions, degrees };
+      const footer = FOOTER.test(bodyText);
+      if (!best || q.score > best.score) best = { text, score: q.score, ok: q.ok, directions: q.directions, degrees, footer, image: prepared.image };
       // Don't spend time on alternate layouts once this read contains a solid
       // set of directions. Weak or partial reads get the fallback pass.
-      if (q.ok && q.directions >= 5 && q.score >= 12) break;
+      // A read that reaches the footer saw the whole page.
+      if (q.ok && footer && q.directions >= 5 && q.score >= 12) break;
     }
     if (best?.ok && best.directions >= 5 && best.score >= 12) break;
   }
-  if (!best?.ok) return { ok: false, name, reason: RETAKE_MESSAGE };
-  return { ok: true, name, text: best.text, thumb: thumbnail(rotate(prepared.image, best.degrees)) };
+  return best;
 }
 
 /** OCR one image region as text, preserving the engine's line order. */
 async function readText(worker: Worker, page: Gray, mode: PageSegmentationMode): Promise<string> {
   await worker.setParameters({ tessedit_pageseg_mode: mode });
-  const { data } = await worker.recognize(grayToCanvas(page), {}, { text: true });
+  // Outside a browser (tests and tools), hand the engine a PGM image instead.
+  const image = typeof document === "undefined" ? grayToPgm(page) : grayToCanvas(page);
+  const { data } = await worker.recognize(image, {}, { text: true });
   return data.text ?? "";
 }
 
@@ -247,6 +275,16 @@ function thumbnail(g: Gray): string | undefined {
   } catch {
     return undefined;
   }
+}
+
+/** A PGM file in a Node Buffer, which the engine reads outside a browser. */
+function grayToPgm(g: Gray): ImageLike {
+  const head = new TextEncoder().encode(`P5\n${g.width} ${g.height}\n255\n`);
+  const out = new Uint8Array(head.length + g.data.length);
+  out.set(head);
+  out.set(g.data, head.length);
+  const NodeBuffer = (globalThis as unknown as { Buffer: { from(bytes: Uint8Array): ImageLike } }).Buffer;
+  return NodeBuffer.from(out);
 }
 
 function grayToCanvas(g: Gray): HTMLCanvasElement {

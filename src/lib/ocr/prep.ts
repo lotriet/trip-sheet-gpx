@@ -370,6 +370,19 @@ export function preparePage(src: Gray): Prepared {
   return { image: flattenLight(page), landscape, cropped: convincing || safeCrop, convincing };
 }
 
+/**
+ * The whole photo, scaled and flattened, with no page crop. Used when the
+ * cropped page lost part of the sheet: a fold or shadow across the paper can
+ * look like background to `findPage`.
+ */
+export function prepareWholePhoto(src: Gray): Prepared {
+  const landscape = src.width > src.height * 1.08;
+  const short = Math.min(src.width, src.height);
+  const s = Math.min(PAGE_WIDTH / short, MAX_PAGE_SIDE / Math.max(src.width, src.height));
+  const page = resize(src, Math.max(1, Math.round(src.width * s)), Math.max(1, Math.round(src.height * s)));
+  return { image: flattenLight(page), landscape, cropped: false, convincing: false };
+}
+
 /** Rotations to try, most likely first. */
 export function rotationCandidates(landscape: boolean): number[] {
   return landscape ? [90, 270] : [0, 180];
