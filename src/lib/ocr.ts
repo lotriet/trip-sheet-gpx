@@ -9,12 +9,22 @@
  */
 
 import { crop, preparePage, prepareWholePhoto, resize, rgbaToGray, rotate, rotationCandidates, type Gray, type Prepared } from "./ocr/prep";
-import { normalizeSheetOcr } from "./ocr/document";
+import { mergeLoadColumn, normalizeSheetOcr } from "./ocr/document";
 import { judgeSheetText, RETAKE_MESSAGE } from "./ocr/quality";
 import type { ImageLike, PSM as PageSegmentationMode } from "tesseract.js";
 
 export type PhotoResult =
-  | { ok: true; name: string; text: string; /** Small JPEG of the page as read, for telling pages apart. */ thumb?: string }
+  | {
+      ok: true;
+      name: string;
+      text: string;
+      /** Small JPEG of the page as read, for telling pages apart. */
+      thumb?: string;
+      /** The page footer was never read, so the bottom of the page may be missing. */
+      incomplete?: boolean;
+      /** The load column has this many more rows than stop lines were read. */
+      missingStops?: number;
+    }
   | { ok: false; name: string; reason: string };
 
 type NativeOcrLine = { text: string; left: number; top: number; width: number; height: number; confidence: number };
@@ -59,9 +69,17 @@ export async function readSheetPhotos(
         const ordered = lines.slice().sort((a, b) => a.top - b.top || a.left - b.left);
         const header = ordered.filter((line) => line.top < 0.18).map((line) => line.text).join("\n");
         const body = ordered.filter((line) => line.left < 0.73).map((line) => line.text).join("\n");
-        const text = normalizeSheetOcr(header, body);
+        const column = ordered.filter((line) => line.left >= 0.73 && line.top >= 0.18).map((line) => line.text).join("\n");
+        const loads = mergeLoadColumn(normalizeSheetOcr(header, body), column);
+        const text = loads.text;
         if (!judgeSheetText(text).ok) throw new PhotoError(RETAKE_MESSAGE);
-        results.push({ ok: true, name, text });
+        results.push({
+          ok: true,
+          name,
+          text,
+          incomplete: !FOOTER.test(ordered.map((line) => line.text).join("\n")),
+          missingStops: loads.missingStops,
+        });
       } catch (err) {
         results.push({ ok: false, name, reason: err instanceof PhotoError ? err.message : RETAKE_MESSAGE });
       }
@@ -142,7 +160,7 @@ const FOOTER = /report\s*name|driver\s*directions\s*-+\s*by\s*route|\bpage\s+\d+
 async function readOne(worker: Worker, file: Blob, name: string, psmModes: PsmModes): Promise<PhotoResult> {
   const read = await readGray(worker, await decodeToGray(file), psmModes);
   if (!read) return { ok: false, name, reason: RETAKE_MESSAGE };
-  return { ok: true, name, text: read.text, thumb: thumbnail(read.page) };
+  return { ok: true, name, text: read.text, thumb: thumbnail(read.page), incomplete: read.incomplete, missingStops: read.missingStops };
 }
 
 /**
@@ -155,15 +173,21 @@ export async function readGray(
   worker: Worker,
   gray: Gray,
   psmModes: PsmModes,
-): Promise<{ text: string; page: Gray } | null> {
+): Promise<{ text: string; page: Gray; incomplete: boolean; missingStops: number } | null> {
   const prepared = preparePage(gray);
   let best = await readPrepared(worker, prepared, psmModes);
   if (prepared.cropped && !best?.footer) {
     const whole = await readPrepared(worker, prepareWholePhoto(gray), psmModes);
-    if (whole && (!best || whole.score > best.score)) best = whole;
+    // On a tie the read that reached the footer saw the whole page.
+    if (whole && (!best || whole.score > best.score || (whole.footer && whole.score >= best.score))) best = whole;
   }
   if (!best?.ok) return null;
-  return { text: best.text, page: rotate(best.image, best.degrees) };
+  const page = rotate(best.image, best.degrees);
+  // The load column, read on its own, counts the page's stops independently.
+  const left = Math.round(page.width * 0.73);
+  const column = await readText(worker, crop(page, { x: left, y: 0, w: Math.max(1, page.width - left), h: page.height }), psmModes.SINGLE_BLOCK);
+  const loads = mergeLoadColumn(best.text, column);
+  return { text: loads.text, page, incomplete: !best.footer, missingStops: loads.missingStops };
 }
 
 async function readPrepared(worker: Worker, prepared: Prepared, psmModes: PsmModes) {

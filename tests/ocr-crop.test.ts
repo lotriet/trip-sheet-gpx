@@ -63,3 +63,33 @@ test("a misread route on one page takes the route the other pages print", async 
   assert.deepEqual(trips.map((t) => t.sheet.route), ["DEMO42", "DEMO42", "DEMO42"]);
   assert.equal(normalizeSheetOcr("Description: OAK HS 01 Run", "06:10 AM 1 OAK HS").split("\n")[0], "Description: OAK HS 01");
 });
+
+test("the load column counts stops and joins their loads", async () => {
+  const { mergeLoadColumn } = await import("../src/lib/ocr/document");
+  const text = "Run: 900.101\n06:10 AM 1 OAK HS\nProceed On OAK HS\n06:20 AM ELM ST & BIRCH LN\nProceed On ELM ST\n06:30 AM SCHOOL: OAK HS";
+  const merged = mergeLoadColumn(text, "Run: 900.101\n0 0 @CP.046\n14 14 900.102\n0 0 900.000\nPage 3");
+  assert.equal(merged.missingStops, 0);
+  assert.match(merged.text, /^06:20 AM ELM ST & BIRCH LN 14 14 900\.102$/m);
+  // Two stop lines were lost; the column still lists every stop.
+  const short = mergeLoadColumn("06:10 AM 1 OAK HS", "0 0 @CP.046\n14 14 900.102\n18 32 900.131");
+  assert.equal(short.missingStops, 2);
+  assert.equal(short.text, "06:10 AM 1 OAK HS");
+});
+
+test("run loads that don't follow the stop loads get a note", async () => {
+  const { loadWarnings } = await import("../src/lib/engine/route");
+  const { parseSheet } = await import("../src/lib/engine/parseSheet");
+  const sheet = parseSheet(`06:10 AM 1 OAK HS 0 0 @CP.046
+Proceed On OAK HS
+06:20 AM ELM ST & BIRCH LN 14 14 900.102
+Proceed On ELM ST
+06:25 AM ELM ST & ASH ST 18 32 900.131
+Proceed On ELM ST
+06:31 AM ELM ST & FIR ST 33 98 900.112
+Proceed On ELM ST
+06:40 AM SCHOOL: OAK HS 0 0 900.000`);
+  const notes = loadWarnings(sheet);
+  assert.equal(notes.length, 1);
+  assert.equal(notes[0].stopIndex, 3);
+  assert.equal(notes[0].level, "info");
+});
