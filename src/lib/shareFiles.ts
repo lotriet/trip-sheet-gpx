@@ -56,8 +56,12 @@ export function downloadText(name: string, text: string, type = "application/oct
   setTimeout(() => URL.revokeObjectURL(url), 4000);
 }
 
-/** Returns "shared", "cancelled" or "downloaded". */
-export async function shareOrDownload(files: TextFile[], title: string): Promise<"shared" | "cancelled" | "downloaded"> {
+/**
+ * Returns "shared", "cancelled" or "downloaded", or "blocked" when the browser
+ * refused the share sheet because this wasn't straight after a tap. A download
+ * would be refused too, so the caller should ask for another tap.
+ */
+export async function shareOrDownload(files: TextFile[], title: string): Promise<"shared" | "cancelled" | "downloaded" | "blocked"> {
   if (sendNativeGpx(files)) return "shared";
   const list = shareableFiles(files);
   if (list) {
@@ -66,6 +70,7 @@ export async function shareOrDownload(files: TextFile[], title: string): Promise
       return "shared";
     } catch (err) {
       if (err instanceof DOMException && err.name === "AbortError") return "cancelled";
+      if (err instanceof DOMException && err.name === "NotAllowedError") return "blocked";
       // Fall through to downloads.
     }
   }

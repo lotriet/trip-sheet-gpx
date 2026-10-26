@@ -47,6 +47,10 @@ type GpxNotice = {
   title: string;
   source: "added" | "single" | "day" | "all";
   state: "ready" | "sharing" | "shared" | "downloaded" | "cancelled";
+  /** Shown under the file name while the GPX waits to be sent. */
+  note?: string;
+  /** iPhone opens several files in another app only one at a time; how many have gone. */
+  sent?: number;
 };
 const EDITOR_DRAFTS_KEY = "trip-sheet-gpx-editor-drafts-v1";
 
@@ -1068,16 +1072,29 @@ export function TripApp() {
   function renderGpxNotice() {
     if (!gpxNotice) return null;
     const bottom = view === "day" || view === "preview" ? "bottom-[16rem]" : "bottom-20";
-    const names = gpxNotice.files.length <= 2
-      ? gpxNotice.files.map((file) => file.name).join(" · ")
-      : `${gpxNotice.files.slice(0, 2).map((file) => file.name).join(" · ")} · +${gpxNotice.files.length - 2} more`;
-    const heading = gpxNotice.state === "ready" ? "Saved to today’s list"
+    const count = gpxNotice.files.length;
+    const sent = gpxNotice.sent ?? 0;
+    const stepwise = sendsOneAtATime(gpxNotice.files);
+    const names = stepwise
+      ? gpxNotice.files[sent]?.name ?? ""
+      : count <= 2
+        ? gpxNotice.files.map((file) => file.name).join(" · ")
+        : `${gpxNotice.files.slice(0, 2).map((file) => file.name).join(" · ")} · +${count - 2} more`;
+    const readyHeading = gpxNotice.source === "added" ? "Saved to today’s list"
+      : gpxNotice.source === "day" ? "Day file ready"
+        : gpxNotice.source === "all" ? (sent ? `Run ${sent} of ${count} sent` : `${count} run files ready`)
+          : "GPX ready";
+    const readyMessage = gpxNotice.note
+      ?? (gpxNotice.source === "added" ? "It’s kept in this browser. To drive it, send it to GPX Nav."
+        : stepwise ? `iPhone sends one file at a time. Tap to send run ${sent + 1} of ${count}.`
+          : canShare ? "Tap Send to GPX Nav, then choose GPX Nav in the share sheet." : "Tap Download GPX to save the file.");
+    const heading = gpxNotice.state === "ready" ? readyHeading
       : gpxNotice.state === "sharing" ? "Preparing GPX…"
-        : gpxNotice.state === "downloaded" ? "GPX file downloaded"
+        : gpxNotice.state === "downloaded" ? (count === 1 ? "GPX file downloaded" : `${count} GPX files downloaded`)
           : gpxNotice.state === "cancelled" ? "Not sent"
-            : "GPX sent";
+            : stepwise ? `All ${count} runs sent` : "GPX sent";
     const message = gpxNotice.state === "ready"
-      ? "It’s kept in this browser. To drive it, send it to GPX Nav."
+      ? readyMessage
       : gpxNotice.state === "sharing"
         ? "In the share sheet, tap GPX Nav. Not in the row? Swipe the apps row and tap More."
         : gpxNotice.state === "downloaded"
@@ -1096,7 +1113,7 @@ export function TripApp() {
           <div className="flex shrink-0 items-center gap-1.5">
             {(gpxNotice.state === "ready" || gpxNotice.state === "cancelled") && (
               <Button type="button" className="h-9 bg-[#173b64] px-2.5 text-xs font-semibold text-white" onClick={shareGpxNotice}>
-                {gpxNotice.state === "ready" ? sendLabel : "Try again"}
+                {gpxNotice.state !== "ready" ? "Try again" : stepwise ? `Send run ${sent + 1} of ${count}` : sendLabel}
               </Button>
             )}
             {gpxNotice.state === "sharing" && <LoaderCircle aria-label="Preparing GPX" className="h-5 w-5 animate-spin text-[#315d8c]" />}
@@ -1277,7 +1294,8 @@ export function TripApp() {
       if (!window.confirm(`This run has ${open.length} warning${open.length === 1 ? "" : "s"} to check:\n\n${list}${more}\n\nMark them checked and send the GPX?`)) return;
       setRunChecked(run.id, true);
     }
-    void deliverGpx([{ name: runFileName(index, run), text: run.gpx }], runFileName(index, run), "single");
+    const name = runFileName(index, run);
+    void deliverGpx({ files: [{ name, text: run.gpx }], title: name, source: "single", state: "ready" });
   }
 
   /** Clear the day's list. Protected runs stay; remove those one at a time. */
@@ -1305,11 +1323,25 @@ export function TripApp() {
     return false;
   }
 
-  async function deliverGpx(files: TextFile[], title: string, source: GpxNotice["source"]) {
-    setGpxNotice({ files, title, source, state: "sharing" });
+  /** Several files to another app on iPhone need one share sheet each. */
+  function sendsOneAtATime(files: TextFile[]) {
+    return canShare && files.length > 1 && typeof window !== "undefined" && !window.TripNavGPX;
+  }
+
+  /**
+   * Share or download a notice's files. Call it straight from a tap: Safari opens the
+   * share sheet only then, so anything slow happens before and ends in a "ready" notice.
+   */
+  async function deliverGpx(notice: GpxNotice) {
+    const sent = notice.sent ?? 0;
+    const stepwise = sendsOneAtATime(notice.files);
+    const files = stepwise ? [notice.files[sent]] : notice.files;
+    setGpxNotice({ ...notice, state: "sharing" });
     try {
-      const result = await shareOrDownload(files, title);
-      setGpxNotice({ files, title, source, state: result });
+      const result = await shareOrDownload(files, files.length === 1 ? files[0].name : notice.title);
+      if (result === "blocked") setGpxNotice({ ...notice, state: "ready" });
+      else if (result === "shared" && stepwise && sent + 1 < notice.files.length) setGpxNotice({ ...notice, sent: sent + 1, note: undefined, state: "ready" });
+      else setGpxNotice({ ...notice, state: result });
     } catch (err) {
       setGpxNotice(null);
       setError(err instanceof Error ? err.message : "The GPX could not be shared or downloaded.");
@@ -1318,7 +1350,7 @@ export function TripApp() {
 
   function shareGpxNotice() {
     if (!gpxNotice || gpxNotice.state === "sharing") return;
-    void deliverGpx(gpxNotice.files, gpxNotice.title, gpxNotice.source);
+    void deliverGpx(gpxNotice);
   }
 
   function shareCurrentRoute() {
@@ -1332,19 +1364,19 @@ export function TripApp() {
       setWarningAcknowledged(true);
     }
     const name = runFileName(0, { run: sheet.run, description: sheet.description, firstTime: sheet.stops[0]?.time ?? "" });
-    void deliverGpx([{ name, text: buildGpx(sheet, route.coords, route.stops, route.turnMarks) }], name, "single");
+    void deliverGpx({ files: [{ name, text: buildGpx(sheet, route.coords, route.stops, route.turnMarks) }], title: name, source: "single", state: "ready" });
   }
 
+  // No dialog first: it would use up the tap the share sheet needs.
   async function shareAll() {
     if (!runs.length || exportLock.current || !allowBatchExport()) return;
     exportLock.current = true;
     setExportingDay(true);
     setError("");
     try {
-      if (!confirmDayOrder()) return;
       const used = new Set<string>();
       const files = runs.map((run, i) => ({ name: gpxFileName(run.run, i, used), text: run.gpx }));
-      await deliverGpx(files, `${files.length} runs`, "all");
+      await deliverGpx({ files, title: `${files.length} runs`, source: "all", state: "ready" });
     } finally {
       exportLock.current = false;
       setExportingDay(false);
@@ -1376,10 +1408,10 @@ export function TripApp() {
         }
       }
       setStatus("");
-      if (!confirmDayOrder(deadheads, exportRuns)) return;
       const gpx = buildDayGpx(exportRuns, deadheads);
       const name = `day_${exportRuns.length}_runs.gpx`;
-      await deliverGpx([{ name, text: gpx }], name, "day");
+      // Routing the deadheads took too long to share on this tap; the notice's button sends it.
+      setGpxNotice({ files: [{ name, text: gpx }], title: name, source: "day", state: "ready", note: dayNote(deadheads, exportRuns.length) });
     } catch (err) {
       setError(err instanceof Error ? err.message : "The day’s GPX could not be built.");
     } finally {
@@ -1389,16 +1421,13 @@ export function TripApp() {
     }
   }
 
-  function confirmDayOrder(deadheads?: DeadheadLeg[], snapshot = runs) {
-    if (!snapshot.length) return false;
-    const review = snapshot.map((run, i) => {
-      const warningCount = run.warnings.filter((w) => w.level === "warn").length;
-      return `${i + 1}. ${run.route || "Route"} ${run.run || ""} — ${run.firstTime || "no time"}${warningCount ? ` — ${warningCount} route warning${warningCount === 1 ? "" : "s"}` : ""}`;
-    }).join("\n");
-    const connections = deadheads?.map((leg, i) =>
-      `Runs ${i + 1} → ${i + 2}: ${leg.routed ? "road route found" : "no road connection found; tracks remain separate"}`,
-    ).join("\n");
-    return window.confirm(`Review today’s GPX order before export:\n\n${review}${connections ? `\n\nBetween runs:\n${connections}` : ""}\n\nCheck any route warnings and verify the order and connections. Continue?`);
+  function dayNote(deadheads: DeadheadLeg[], count: number) {
+    const missing = deadheads.filter((leg) => !leg.routed).length;
+    const order = `${count} runs in list order.`;
+    if (!deadheads.length) return `${order} Tap to send it to GPX Nav.`;
+    return missing
+      ? `${order} ${missing} of ${deadheads.length} drives between runs had no road route; check those gaps before driving.`
+      : `${order} Drives between runs found by road. Tap to send it to GPX Nav.`;
   }
 
   const previewStops = useMemo(
@@ -1698,7 +1727,7 @@ export function TripApp() {
                 </p>
               ) : (
                 <p className="text-center text-xs leading-relaxed text-[#3d4b63]">{canShare
-                  ? "Both open the share sheet: tap GPX Nav to load the runs (under More if you don’t see it)."
+                  ? "When the share sheet opens, tap GPX Nav (under More if you don’t see it)."
                   : "Files go to your Downloads folder; open them from there with GPX Nav."}</p>
               )}
               </>)}
