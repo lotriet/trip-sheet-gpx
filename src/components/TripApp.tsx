@@ -236,6 +236,12 @@ export function TripApp() {
   useEffect(() => {
     if (error) saveAfterBuild.current = false;
   }, [error]);
+  // A sent or cancelled notice has nothing left to do; let it go so it stops covering buttons.
+  useEffect(() => {
+    if (gpxNotice?.state !== "shared" && gpxNotice?.state !== "cancelled") return;
+    const timer = setTimeout(() => setGpxNotice((now) => (now === gpxNotice ? null : now)), 8000);
+    return () => clearTimeout(timer);
+  }, [gpxNotice]);
   useEffect(() => {
     if (view !== "preview" || !revealMapAfterBuild.current) return;
     revealMapAfterBuild.current = false;
@@ -1073,7 +1079,7 @@ export function TripApp() {
     const message = gpxNotice.state === "ready"
       ? "It’s kept in this browser. To drive it, send it to GPX Nav."
       : gpxNotice.state === "sharing"
-        ? "Opening the phone’s share options…"
+        ? "In the share sheet, tap GPX Nav. Not in the row? Swipe the apps row and tap More."
         : gpxNotice.state === "downloaded"
           ? "It’s in Downloads (iPhone: Files app › Downloads). Tap it there and choose GPX Nav."
           : gpxNotice.state === "cancelled"
@@ -1692,7 +1698,7 @@ export function TripApp() {
                 </p>
               ) : (
                 <p className="text-center text-xs leading-relaxed text-[#3d4b63]">{canShare
-                  ? "Both open the share sheet: pick GPX Nav to load the runs, or Save to Files to keep a copy."
+                  ? "Both open the share sheet: tap GPX Nav to load the runs (under More if you don’t see it)."
                   : "Files go to your Downloads folder; open them from there with GPX Nav."}</p>
               )}
               </>)}
