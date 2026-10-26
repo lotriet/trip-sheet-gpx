@@ -193,8 +193,9 @@ export function TripApp() {
   const [exportingDay, setExportingDay] = useState(false);
   const exportLock = useRef(false);
   const movePanel = useRef<HTMLDivElement>(null);
-  // Server render says "Download all"; the phone switches to "Share all" if it can.
+  // Server render says "Download"; the phone switches to "Send to GPX Nav" if it can share files.
   const canShare = useSyncExternalStore(noSubscribe, canShareFiles, () => false);
+  const sendLabel = canShare ? "Send to GPX Nav" : "Download GPX";
   const trips = useMemo(() => buildTrips(pages, pageKeys), [pages, pageKeys]);
   // Street names in the form, checked against the map around the stops.
   const [checking, setChecking] = useState(false);
@@ -1064,20 +1065,20 @@ export function TripApp() {
     const names = gpxNotice.files.length <= 2
       ? gpxNotice.files.map((file) => file.name).join(" · ")
       : `${gpxNotice.files.slice(0, 2).map((file) => file.name).join(" · ")} · +${gpxNotice.files.length - 2} more`;
-    const heading = gpxNotice.state === "ready" ? "GPX ready"
+    const heading = gpxNotice.state === "ready" ? "Saved to today’s list"
       : gpxNotice.state === "sharing" ? "Preparing GPX…"
-        : gpxNotice.state === "downloaded" ? "GPX downloaded"
-          : gpxNotice.state === "cancelled" ? "Sharing cancelled"
+        : gpxNotice.state === "downloaded" ? "GPX file downloaded"
+          : gpxNotice.state === "cancelled" ? "Not sent"
             : "GPX sent";
     const message = gpxNotice.state === "ready"
-      ? "The run is on today’s list. Share it to open in GPX Nav, or save it to Files."
+      ? "It’s kept in this browser. To drive it, send it to GPX Nav."
       : gpxNotice.state === "sharing"
         ? "Opening the phone’s share options…"
         : gpxNotice.state === "downloaded"
-          ? "Find the file in Downloads or Files, then open it with GPX Nav."
+          ? "It’s in Downloads (iPhone: Files app › Downloads). Tap it there and choose GPX Nav."
           : gpxNotice.state === "cancelled"
-            ? gpxNotice.source === "single" ? "The route is still available; you can share it again." : "Your run is still saved in today’s list."
-            : "Choose GPX Nav to open the track, or Save to Files for later.";
+            ? "Nothing was sent. Your runs are still on today’s list."
+            : "If you chose GPX Nav, the run is now in its list. If you chose Save to Files, it’s in the Files app where you saved it.";
     return (
       <div className={`fixed inset-x-0 ${bottom} z-[1300] px-3`} role="status" aria-live="polite">
         <div className="mx-auto flex max-w-2xl items-center justify-between gap-3 rounded-xl border border-[#cbd9eb] bg-white p-3 text-[#17243a] shadow-xl">
@@ -1089,7 +1090,7 @@ export function TripApp() {
           <div className="flex shrink-0 items-center gap-1.5">
             {(gpxNotice.state === "ready" || gpxNotice.state === "cancelled") && (
               <Button type="button" className="h-9 bg-[#173b64] px-2.5 text-xs font-semibold text-white" onClick={shareGpxNotice}>
-                {gpxNotice.state === "ready" ? "Share / open" : "Try again"}
+                {gpxNotice.state === "ready" ? sendLabel : "Try again"}
               </Button>
             )}
             {gpxNotice.state === "sharing" && <LoaderCircle aria-label="Preparing GPX" className="h-5 w-5 animate-spin text-[#315d8c]" />}
@@ -1267,7 +1268,7 @@ export function TripApp() {
     if (open.length) {
       const list = open.slice(0, 4).map((w) => `• ${w.message}`).join("\n");
       const more = open.length > 4 ? `\n…and ${open.length - 4} more.` : "";
-      if (!window.confirm(`This run has ${open.length} warning${open.length === 1 ? "" : "s"} to check:\n\n${list}${more}\n\nMark them checked and download the GPX?`)) return;
+      if (!window.confirm(`This run has ${open.length} warning${open.length === 1 ? "" : "s"} to check:\n\n${list}${more}\n\nMark them checked and send the GPX?`)) return;
       setRunChecked(run.id, true);
     }
     void deliverGpx([{ name: runFileName(index, run), text: run.gpx }], runFileName(index, run), "single");
@@ -1316,12 +1317,12 @@ export function TripApp() {
 
   function shareCurrentRoute() {
     if (!route) return;
-    // Same rule as a saved run's Download GPX: list unchecked warnings once and ask.
+    // Same rule as a saved run’s send button: list unchecked warnings once and ask.
     const open = warningAcknowledged ? [] : route.warnings.filter((w) => w.level === "warn");
     if (open.length) {
       const list = open.slice(0, 4).map((w) => `• ${w.message}`).join("\n");
       const more = open.length > 4 ? `\n…and ${open.length - 4} more.` : "";
-      if (!window.confirm(`This route has ${open.length} warning${open.length === 1 ? "" : "s"} to check:\n\n${list}${more}\n\nMark them checked and download the GPX?`)) return;
+      if (!window.confirm(`This route has ${open.length} warning${open.length === 1 ? "" : "s"} to check:\n\n${list}${more}\n\nMark them checked and send the GPX?`)) return;
       setWarningAcknowledged(true);
     }
     const name = runFileName(0, { run: sheet.run, description: sheet.description, firstTime: sheet.stops[0]?.time ?? "" });
@@ -1500,6 +1501,7 @@ export function TripApp() {
               <div>
                 <p className="text-xs font-bold uppercase tracking-[0.12em] text-[#68758a]">Today’s route list</p>
                 <p className="text-lg font-bold tracking-tight">{runs.length} {runs.length === 1 ? "run" : "runs"} · {runs.reduce((sum, run) => sum + run.miles, 0).toFixed(1)} mi</p>
+                <p className="text-xs leading-relaxed text-[#53627a]">Saved in this browser. GPX Nav gets them when you send them.</p>
               </div>
               <div className="flex items-center gap-2">
                 {runs.some((run) => !run.warningsAcknowledged && run.warnings.some((warning) => warning.level === "warn")) && (
@@ -1644,7 +1646,7 @@ export function TripApp() {
                   Edit
                 </Button>
                 <Button type="button" variant="outline" className="h-9 border-[#dce3ed] bg-[#f8fafc] text-xs font-semibold text-[#34445c]" onClick={() => downloadRun(run, i)}>
-                  Download GPX
+                  {sendLabel}
                 </Button>
               </div>
               <details className="mt-2 border-t border-[#edf0f4] pt-2">
@@ -1677,10 +1679,10 @@ export function TripApp() {
               {runs.length > 0 && (<>
               <div className="grid grid-cols-2 gap-2">
                 <Button type="button" variant="outline" className="h-10 rounded-xl border-[#dce3ec] bg-[#f8fafc] text-xs font-semibold" disabled={!runs.length || exportingDay} aria-describedby={unreviewedRuns.length ? "export-needs-review" : undefined} onClick={() => void exportDay()}>
-                  {exportingDay ? "Preparing GPX…" : "One GPX for the day"}
+                  {exportingDay ? "Preparing GPX…" : "Whole day as 1 file"}
                 </Button>
                 <Button type="button" variant="outline" className="h-10 rounded-xl border-[#dce3ec] bg-[#f8fafc] text-xs font-semibold" disabled={!runs.length || exportingDay} aria-describedby={unreviewedRuns.length ? "export-needs-review" : undefined} onClick={() => void shareAll()}>
-                  {exportingDay ? "Preparing GPX…" : canShare ? "Share all" : "Download all"}
+                  {exportingDay ? "Preparing GPX…" : `Each run (${runs.length} ${runs.length === 1 ? "file" : "files"})`}
                 </Button>
               </div>
               {unreviewedRuns.length > 0 ? (
@@ -1689,7 +1691,9 @@ export function TripApp() {
                   Check the warnings on {unreviewedRuns.map((run) => `run ${runs.indexOf(run) + 1}`).join(", ")} first. Tap a button to go there.
                 </p>
               ) : (
-                <p className="text-center text-xs leading-relaxed text-[#3d4b63]">One GPX combines runs in this order. Share all sends a separate file for each run.</p>
+                <p className="text-center text-xs leading-relaxed text-[#3d4b63]">{canShare
+                  ? "Both open the share sheet: pick GPX Nav to load the runs, or Save to Files to keep a copy."
+                  : "Files go to your Downloads folder; open them from there with GPX Nav."}</p>
               )}
               </>)}
             </div>
@@ -2387,7 +2391,7 @@ export function TripApp() {
                       Edit directions
                     </Button>
                     <Button type="button" variant="outline" className="h-12" disabled={routeBuilding || !!status} onClick={shareCurrentRoute}>
-                      Download GPX
+                      {sendLabel}
                     </Button>
                   </div>
                 </>
