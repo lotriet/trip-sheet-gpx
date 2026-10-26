@@ -65,3 +65,26 @@ test("a run saved before turn points is flagged for a rebuild", async () => {
   assert.equal(lacksTurnPoints(result.gpx), false);
   assert.equal(lacksTurnPoints(result.gpx.replace(/<trkpt ([^>]*)><name>[^<]*<\/name><type>[^<]*<\/type><\/trkpt>/g, "<trkpt $1/>")), true);
 });
+
+test("a roundabout line is driven through, not searched for as a street", async () => {
+  const withRoundabout = parseSheet(`07:00 AM MAPLE AVE & ELM ST
+Proceed On MAPLE AVE
+Proceed Onto ROUNDABOUT
+Proceed Onto MAPLE AVE
+Left Turn Onto BIRCH LN
+07:06 AM BIRCH LN & MAPLE AVE`);
+  const result = await routeSheet(withRoundabout, { lines, places: [] });
+  assert.equal(result.ok, true, result.ok ? "" : result.error);
+  if (!result.ok) return;
+  assert.doesNotMatch(result.warnings.map((w) => w.message).join("\n"), /ROUNDABOUT/);
+  assert.equal(result.turnMarks.length, 1);
+  assert.ok(haversine(result.coords[result.turnMarks[0].trackIndex], [-78.7, 35.8]) < 5);
+});
+
+test("a saved run's GPX gives back its turn pins for the map", async () => {
+  const { turnPinsFromGpx } = await import("../src/lib/dayPlan");
+  const result = await routeSheet(sheet, { lines, places: [] });
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+  assert.deepEqual(turnPinsFromGpx(result.gpx), [{ lat: 35.8, lon: -78.7, label: "Left on Birch Ln", kind: "left", confirmed: true }]);
+});
