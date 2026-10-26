@@ -212,6 +212,23 @@ export function TripApp() {
     JSON.stringify(currentDraft.overrides) === JSON.stringify(overrides) &&
     JSON.stringify(currentDraft.warnings) === JSON.stringify(editWarnings);
   const editingRun = editingId ? runs.find((run) => run.id === editingId) : undefined;
+  // A run opened to move its turnaround is built once its sheet and map settings are in place.
+  const pendingBuild = useRef(false);
+  useEffect(() => {
+    if (!pendingBuild.current || view !== "edit" || !sheet.stops.length) return;
+    pendingBuild.current = false;
+    revealMapAfterBuild.current = true;
+    void generate();
+    // generate reads the state this effect waits for.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [view, sheet, overrides]);
+  const revealMapAfterBuild = useRef(false);
+  useEffect(() => {
+    if (view !== "preview" || !revealMapAfterBuild.current) return;
+    revealMapAfterBuild.current = false;
+    requestAnimationFrame(() => document.querySelector("[data-route-map]")?.scrollIntoView({ behavior: "smooth", block: "center" }));
+  }, [view, route]);
+
   const unreviewedRuns = useMemo(
     () => runs.filter((run) => !run.warningsAcknowledged && run.warnings.some((warning) => warning.level === "warn")),
     [runs],
@@ -543,7 +560,9 @@ export function TripApp() {
     setView("edit");
   }
 
-  function openEdit(run: SavedRun) {
+  /** Open a saved run in the editor. With [build], build it straight away to show the route map. */
+  function openEdit(run: SavedRun, build = false) {
+    pendingBuild.current = build;
     setEditingId(run.id);
     setDraftId(`run-${run.id}`);
     setDraftActive(true);
@@ -569,7 +588,7 @@ export function TripApp() {
     setEditorWarningCursor(0);
     pendingEditorWarning.current = mappedWarnings.length ? mappedWarnings[0] : null;
     setMapData(null);
-    setOverrides({ vias: run.vias ?? [] });
+    setOverrides({ vias: run.vias ?? [], ...(run.turnarounds ? { turnarounds: run.turnarounds } : {}) });
     setError("");
     setView("edit");
   }
@@ -766,7 +785,7 @@ export function TripApp() {
     if (reviewKey === from) setReviewKey(null);
   }
 
-  function savedRunFrom(id: string, sheetText: string, built: Sheet, result: RouteSuccess, vias: { lat: number; lon: number; street?: string }[] = [], warningsAcknowledged = false): SavedRun {
+  function savedRunFrom(id: string, sheetText: string, built: Sheet, result: RouteSuccess, vias: { lat: number; lon: number; street?: string }[] = [], warningsAcknowledged = false, turnarounds?: RouteOverrides["turnarounds"]): SavedRun {
     return {
       id,
       area,
@@ -782,6 +801,7 @@ export function TripApp() {
       warnings: result.warnings.map((w) => ({ ...w })),
       warningsAcknowledged,
       vias,
+      ...(turnarounds && Object.keys(turnarounds).length ? { turnarounds } : {}),
     };
   }
 
@@ -1162,7 +1182,7 @@ export function TripApp() {
       setError("This GPX is locked. Return to today’s list and unlock it before replacing the saved track.");
       return;
     }
-    const saved = savedRunFrom(editingId ?? newId(), text, sheet, route, overrides.vias ?? [], warningAcknowledged);
+    const saved = savedRunFrom(editingId ?? newId(), text, sheet, route, overrides.vias ?? [], warningAcknowledged, overrides.turnarounds);
     const willFinishReview = !reviewKey || trips.every((trip) => trip.key === reviewKey || tripStates[trip.key]?.state === "added");
     const file = {
       name: runFileName(0, { run: saved.run, description: saved.description, firstTime: saved.firstTime }),
@@ -1560,6 +1580,11 @@ export function TripApp() {
                     <Button type="button" variant="outline" className="h-9 border-[#e5c981] bg-white px-3 text-sm font-semibold text-[#68470b]" onClick={() => setMapRun(mapRun === run.id ? null : run.id)} disabled={run.coords.length < 2}>
                       {mapRun === run.id ? "Hide map" : "Show on map"}
                     </Button>
+                    {warnings.some((w) => w.message.startsWith("Turnaround on")) && (
+                      <Button type="button" variant="outline" className="h-9 border-[#e5c981] bg-white px-3 text-sm font-semibold text-[#68470b]" onClick={() => openEdit(run, true)} disabled={exportingDay}>
+                        Move turnaround
+                      </Button>
+                    )}
                     <Button type="button" variant="outline" className="h-9 border-[#e5c981] bg-white px-3 text-sm font-semibold text-[#68470b]" onClick={() => openEdit(run)} disabled={exportingDay}>
                       Fix in editor
                     </Button>
@@ -2161,6 +2186,15 @@ export function TripApp() {
               selectedTurnaround={pick}
               picking={tapMode !== null}
               onMapClick={onMapClick}
+              onMoveTurnaround={(id, lat, lon) => {
+                if (status || routeBuilding) return;
+                const next = { ...overrides, turnarounds: { ...overrides.turnarounds, [id]: { lat, lon } } };
+                setOverrides(next);
+                setPick(null);
+                setTapMode(null);
+                scrollRestoreRef.current = window.scrollY;
+                void generate(next);
+              }}
             />
             {tapMode !== null && (
               <div className="pointer-events-none absolute left-12 right-3 top-3 z-[1100] rounded-lg border-2 border-[#0f2744] bg-white/95 p-3 text-sm shadow-lg" role="status">
@@ -2260,7 +2294,7 @@ export function TripApp() {
               })}
             </ol>
           </details>
-          <p className="text-sm text-[#3d4b63]">Blue dots are required route points. Orange dots are estimated turnarounds. Tap a warning above to fix a direction or guide the route.</p>
+          <p className="text-sm text-[#3d4b63]">Blue dots are required route points. Orange dots are turnarounds: drag one to where the bus turns around, and the route rebuilds. Tap a warning above to fix a direction or guide the route.</p>
           {(overrides.vias?.length ?? 0) > 0 && (
             <p className="text-sm font-medium">
               This track passes through {overrides.vias?.map((v, n) => v.street || `waypoint ${n + 1}`).join(", ")}. The blue {overrides.vias?.length === 1 ? "dot is" : "dots are"} on the map.

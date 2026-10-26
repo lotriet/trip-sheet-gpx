@@ -24,6 +24,8 @@ export type SavedRun = {
   locked?: boolean;
   /** Taps the track was bent through. Old saved runs omit this. */
   vias?: { lat: number; lon: number; street?: string }[];
+  /** Turnarounds the driver moved, by pin id. Old saved runs omit this. */
+  turnarounds?: Record<string, { lat: number; lon: number }>;
 };
 
 function openDb(): Promise<IDBDatabase> {
