@@ -1,14 +1,14 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { ArrowUp, CornerUpLeft, CornerUpRight, House, LoaderCircle, RotateCcw } from "lucide-react";
+import { ArrowUp, CornerUpLeft, CornerUpRight, House, LoaderCircle, RotateCcw, Trash2 } from "lucide-react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { EXAMPLE_SHEET_TEXT } from "@/lib/exampleSheet";
-import { buildDayGpx, lacksTurnPoints, runFileName, type DeadheadLeg } from "@/lib/dayPlan";
+import { buildDayGpx, lacksTurnPoints, runFileName, turnPinsFromGpx, type DeadheadLeg, type TurnPin } from "@/lib/dayPlan";
 import { driveBetween } from "@/lib/engine/drive";
-import { buildGpx } from "@/lib/engine/gpx";
+import { buildGpx, maneuverPhrase } from "@/lib/engine/gpx";
 import { classifyLocation, parseSheet } from "@/lib/engine/parseSheet";
 import { routeSheet } from "@/lib/engine/route";
 import type { LonLat, Maneuver, ManeuverKind, RawLine, RouteOverrides, RouteSuccess, Sheet, TurnaroundPin, Warning } from "@/lib/engine/types";
@@ -724,11 +724,22 @@ export function TripApp() {
     setStatus("");
     const good = results.flatMap((r, i) => (r.ok ? [{ photo: i, name: r.name, text: r.text, thumb: r.thumb }] : []));
     const bad = results.flatMap((r, i) => (r.ok ? [] : [{ photo: i, reason: r.reason }]));
-    const badNote = bad.length
+    const unreadNote = bad.length
       ? results.length === 1
         ? bad[0].reason
         : `Couldn't read ${bad.map((b) => results[b.photo]?.name || `page ${b.photo + 1}`).join(", ")}. ${RETAKE_MESSAGE.replace("Couldn't read this photo. ", "")}`
       : "";
+    // A page whose footer never came through may have lost its last stops and turns.
+    const cut = results.flatMap((r, i) => (r.ok && r.incomplete ? [results.length === 1 ? "this photo" : `photo ${i + 1}`] : []));
+    const cutNote = cut.length
+      ? `The bottom of ${cut.join(", ")} may be cut off: its page footer wasn't read. Check the last stops and turns against the sheet, or retake it flat and well lit.`
+      : "";
+    // The load column has one row per stop; extra rows mean stop lines were not read.
+    const short = results.flatMap((r, i) => (r.ok && r.missingStops ? [`${results.length === 1 ? "this photo" : `photo ${i + 1}`} (${r.missingStops})`] : []));
+    const shortNote = short.length
+      ? `Some stops may be missing from ${short.join(", ")}: the load column lists more stops than were read. Check the stops against the sheet.`
+      : "";
+    const badNote = [unreadNote, cutNote, shortNote].filter(Boolean).join(" ");
     if (takeText(good, badNote)) return;
     if (good.length) {
       // One run: put its pages in order (first page before the continuation).
@@ -1192,10 +1203,27 @@ export function TripApp() {
   }
 
   function removeRun(run: SavedRun) {
-    if (run.locked || exportLock.current) return;
+    if (exportLock.current) return;
     const label = [run.route, run.run].filter(Boolean).join(" ") || "this GPX";
-    if (!window.confirm(`Remove ${label} from today’s list? This also deletes its saved GPX from this phone.`)) return;
+    const ask = run.locked
+      ? `${label} is protected. Remove it anyway? This also deletes its saved GPX from this phone.`
+      : `Remove ${label} from today’s list? This also deletes its saved GPX from this phone.`;
+    if (!window.confirm(ask)) return;
     setRuns((prev) => prev.filter((item) => item.id !== run.id));
+  }
+
+  /** Clear the day's list. Protected runs stay; remove those one at a time. */
+  function removeAllRuns() {
+    if (exportLock.current || !runs.length) return;
+    const kept = runs.filter((run) => run.locked).length;
+    const gone = runs.length - kept;
+    if (!gone) {
+      setError("Every run is protected. Remove a protected run from its own card.");
+      return;
+    }
+    const keepNote = kept ? ` ${kept} protected ${kept === 1 ? "run stays" : "runs stay"}.` : "";
+    if (!window.confirm(`Remove ${gone} ${gone === 1 ? "run" : "runs"} from today’s list? Their saved GPX files are deleted from this phone.${keepNote}`)) return;
+    setRuns((prev) => prev.filter((run) => run.locked));
   }
 
   function allowBatchExport() {
@@ -1464,6 +1492,16 @@ export function TripApp() {
                   <p className="mt-0.5 truncate text-sm font-medium text-[#46546a]">{run.description || "Untitled sheet"}</p>
                   <p className="mt-1 text-xs font-medium text-[#68758a]">{run.firstTime} <span className="px-1 text-[#a5afbd]">·</span> {run.miles.toFixed(2)} miles</p>
                 </div>
+                <button
+                  type="button"
+                  className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-[#8a2a2a] hover:bg-[#fbeaea] disabled:opacity-30"
+                  onClick={() => removeRun(run)}
+                  disabled={exportingDay}
+                  aria-label={`Remove run ${[run.route, run.run].filter(Boolean).join(" ") || i + 1}`}
+                  title={run.locked ? "Remove (protected — asks first)" : "Remove run"}
+                >
+                  <Trash2 className="h-4 w-4" aria-hidden />
+                </button>
               </div>
               {warnings.length > 0 && (
                 <div className={`mt-3 rounded-xl border border-[#f0d28d] border-l-4 border-l-[#d28b16] p-3 ${run.warningsAcknowledged ? "bg-[#fffdf5]" : "bg-[#fff9ea]"}`} role={run.warningsAcknowledged ? "status" : "alert"}>
@@ -1497,6 +1535,7 @@ export function TripApp() {
                     stops={run.stops.map((s) => ({ lat: s.lat, lon: s.lon, label: `${s.time} ${s.description}` }))}
                     turnarounds={[]}
                     vias={run.vias ?? []}
+                    turns={turnPinsFromGpx(run.gpx)}
                   />
                   <p className="mt-1 text-sm text-[#3d4b63]">Blue dots are via points. The dark line bends through each one, then returns to the printed streets.</p>
                 </div>
@@ -1518,14 +1557,22 @@ export function TripApp() {
                   <Button type="button" variant="outline" className={`h-8 px-2.5 text-xs ${run.locked ? "border-[#abd0b5] bg-[#f0f8f2] text-[#216338]" : "border-[#dce3ed] bg-white text-[#34445c]"}`} onClick={() => toggleRunLock(run.id)} disabled={exportingDay} aria-pressed={!!run.locked}>
                     {run.locked ? "Unlock GPX" : "Protect GPX"}
                   </Button>
-                  <Button type="button" variant="destructive" className="h-8 px-2.5 text-xs" onClick={() => removeRun(run)} disabled={exportingDay || !!run.locked}>
-                    {run.locked ? "Protected from removal" : "Remove run"}
+                  <Button type="button" variant="destructive" className="h-8 px-2.5 text-xs" onClick={() => removeRun(run)} disabled={exportingDay}>
+                    Remove run
                   </Button>
                 </div>
               </details>
             </article>
             );
           })}
+          {runs.length > 1 && (
+            <div className="flex justify-center">
+              <Button type="button" variant="outline" className="h-9 border-[#ecc9c9] bg-white px-3 text-xs font-semibold text-[#8a2a2a]" onClick={removeAllRuns} disabled={exportingDay}>
+                <Trash2 className="mr-1.5 h-3.5 w-3.5" aria-hidden />
+                Remove all runs
+              </Button>
+            </div>
+          )}
           <div className="fixed inset-x-0 bottom-0 z-[1200] border-t border-[#dce3ec] bg-white p-3 shadow-[0_-8px_28px_rgba(24,39,62,0.12)]">
             <div className="mx-auto flex max-w-2xl flex-col gap-2">
               <Button type="button" className="h-11 rounded-xl bg-[#173b64] text-sm font-bold text-white shadow-sm" onClick={openNew} disabled={exportingDay}>
@@ -2031,6 +2078,7 @@ export function TripApp() {
               coords={route.coords}
               stops={previewStops}
               turnarounds={route.turnarounds}
+              turns={routeTurnPins(route)}
               warningStops={route.warnings.filter((w) => w.level === "warn").flatMap((w) => {
                 if (w.location) return [{ lat: w.location[1], lon: w.location[0], label: w.message.startsWith("The map has an incomplete connection") ? "Check map connection" : "Check one-way direction" }];
                 const stop = route.stops.find((s) => s.index === w.stopIndex);
@@ -2417,4 +2465,13 @@ function StreetMark({ state, open, onTap }: { state: string; open: boolean; onTa
     return <span className="mx-auto flex h-7 w-7 items-center justify-center rounded-full bg-[#f0f2f4] text-xs text-[#657084]" aria-label="Checking the street">…</span>;
   }
   return <span className="w-9" aria-hidden />;
+}
+
+/** The route's printed turns as map pins. Turnarounds already have their own pins. */
+function routeTurnPins(route: RouteSuccess): TurnPin[] {
+  return route.turnMarks.flatMap((mark) => {
+    const point = route.coords[mark.trackIndex];
+    if (!point || mark.kind === "turnaround") return [];
+    return [{ lat: point[1], lon: point[0], label: maneuverPhrase(mark.kind, mark.street), kind: mark.kind, confirmed: mark.confirmed }];
+  });
 }

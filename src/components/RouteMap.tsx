@@ -1,10 +1,11 @@
 "use client";
 
 import { useEffect } from "react";
-import { CircleMarker, MapContainer, Marker, Polyline, TileLayer, useMap, useMapEvents } from "react-leaflet";
+import { CircleMarker, MapContainer, Marker, Polyline, Popup, TileLayer, useMap, useMapEvents } from "react-leaflet";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import type { LonLat, TurnaroundPin } from "@/lib/engine/types";
+import type { TurnPin } from "@/lib/dayPlan";
 
 type StopPin = { lat: number; lon: number; label: string };
 
@@ -59,11 +60,24 @@ function numberIcon(n: number) {
   });
 }
 
+/** L, R or U where the track turns. Amber when the router could not confirm the intersection. */
+function turnIcon(pin: TurnPin) {
+  const letter = pin.kind === "left" ? "L" : pin.kind === "right" ? "R" : "U";
+  const fill = pin.confirmed ? "#ffffff" : "#f59e0b";
+  return L.divIcon({
+    className: "turn-pin",
+    html: `<div style="width:20px;height:20px;border-radius:6px;background:${fill};color:#0f2744;display:flex;align-items:center;justify-content:center;font:800 11px/1 sans-serif;border:2px solid #0f2744;box-shadow:0 1px 2px rgba(0,0,0,.35)">${letter}</div>`,
+    iconSize: [20, 20],
+    iconAnchor: [10, 10],
+  });
+}
+
 export default function RouteMap({
   coords,
   stops,
   turnarounds,
   vias = [],
+  turns = [],
   warningStops = [],
   highlightedLines = [],
   focusArea,
@@ -76,6 +90,8 @@ export default function RouteMap({
   stops: StopPin[];
   turnarounds: TurnaroundPin[];
   vias?: { lat: number; lon: number }[];
+  /** Where each printed turn happens on the track. */
+  turns?: TurnPin[];
   warningStops?: StopPin[];
   highlightedLines?: LonLat[][];
   focusArea?: LonLat[];
@@ -103,6 +119,11 @@ export default function RouteMap({
       )}
       {highlightedLines.map((line, i) => line.length > 1 && (
         <Polyline key={`highlight-${i}`} positions={line.map(([lon, lat]) => [lat, lon] as [number, number])} pathOptions={{ color: "#e11d48", weight: 8, opacity: 0.95, dashArray: "8 8" }} />
+      ))}
+      {turns.map((t, i) => (
+        <Marker key={`turn-${i}-${t.lat}-${t.lon}`} position={[t.lat, t.lon]} icon={turnIcon(t)} title={t.label}>
+          <Popup>{t.confirmed ? t.label : `${t.label} — not confirmed at a clear intersection; check it against the sheet.`}</Popup>
+        </Marker>
       ))}
       {stops.map((s, i) => (
         <Marker key={`${s.lat}-${s.lon}-${i}`} position={[s.lat, s.lon]} icon={numberIcon(i + 1)} title={s.label} />

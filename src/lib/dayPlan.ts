@@ -23,6 +23,20 @@ export type DayRunTrack = {
 
 type DayPoint = { point: LonLat; turn?: string };
 
+/** A printed turn drawn on a map: where it happens and whether the router confirmed it. */
+export type TurnPin = { lat: number; lon: number; label: string; kind: "left" | "right" | "turnaround"; confirmed: boolean };
+
+/** Turn pins from a run's own GPX, for saved runs that no longer carry their route result. */
+export function turnPinsFromGpx(gpx: string): TurnPin[] {
+  const pins: TurnPin[] = [];
+  for (const m of gpx.matchAll(/<trkpt lat="([^"]+)" lon="([^"]+)"><name>([^<]*)<\/name><type>(turn(?:-unconfirmed)?)<\/type><\/trkpt>/g)) {
+    const label = m[3].replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"');
+    const kind = /^left\b/i.test(label) ? "left" : /^right\b/i.test(label) ? "right" : "turnaround";
+    pins.push({ lat: Number(m[1]), lon: Number(m[2]), label, kind, confirmed: m[4] === "turn" });
+  }
+  return pins;
+}
+
 /**
  * A run GPX saved before turn points were written: it has printed turns but no
  * `<trkpt>` marking where they happen. Building it again adds them.
