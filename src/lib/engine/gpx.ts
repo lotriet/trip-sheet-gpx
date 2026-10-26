@@ -1,4 +1,4 @@
-import type { LonLat, PlacedStop, Sheet } from "./types";
+import type { LonLat, PlacedStop, Sheet, TurnMark } from "./types";
 
 function esc(s: string): string {
   return s
@@ -60,7 +60,24 @@ function maneuverPhrase(kind: string, street: string): string {
   return `Turn around on ${name}`;
 }
 
-export function buildGpx(sheet: Sheet, track: LonLat[], stops: PlacedStop[]): string {
+/** GPX `<type>` for a track point where a printed turn happens. */
+export const TURN_TYPE = "turn";
+/** The router could not confirm this turn's spot; a follower should treat it as approximate. */
+export const TURN_UNCONFIRMED_TYPE = "turn-unconfirmed";
+
+/**
+ * One `<trkpt>`. A turn point carries the printed maneuver as its name, so a
+ * follower knows exactly where on the track the turn is. GPX apps that do not
+ * read point names ignore it.
+ */
+export function trackPointXml(point: LonLat, turn?: Pick<TurnMark, "kind" | "street" | "confirmed">): string {
+  const attrs = `lat="${point[1].toFixed(6)}" lon="${point[0].toFixed(6)}"`;
+  if (!turn) return `<trkpt ${attrs}/>`;
+  const type = turn.confirmed ? TURN_TYPE : TURN_UNCONFIRMED_TYPE;
+  return `<trkpt ${attrs}><name>${esc(maneuverPhrase(turn.kind, turn.street))}</name><type>${type}</type></trkpt>`;
+}
+
+export function buildGpx(sheet: Sheet, track: LonLat[], stops: PlacedStop[], turns: TurnMark[] = []): string {
   const titleBits = [sheet.route, sheet.run ? `Run ${sheet.run}` : "", sheet.description ? prettySheetText(sheet.description) : ""]
     .map((s) => s.trim())
     .filter(Boolean);
@@ -95,9 +112,11 @@ export function buildGpx(sheet: Sheet, track: LonLat[], stops: PlacedStop[]): st
   lines.push(
     `<trk><name>${esc(title)}</name><desc>${esc(streetList || title)}</desc><type>Car</type><trkseg>`,
   );
-  for (const [lon, lat] of track) {
-    lines.push(`<trkpt lat="${lat.toFixed(6)}" lon="${lon.toFixed(6)}"/>`);
+  const turnAt = new Map<number, TurnMark>();
+  for (const turn of turns) {
+    if (turn.trackIndex >= 0 && turn.trackIndex < track.length && !turnAt.has(turn.trackIndex)) turnAt.set(turn.trackIndex, turn);
   }
+  track.forEach((point, i) => lines.push(trackPointXml(point, turnAt.get(i))));
   lines.push(`</trkseg></trk></gpx>`);
   return lines.join("\n") + "\n";
 }

@@ -2,7 +2,6 @@ import { buildGpx } from "./gpx";
 import {
   arrivalHeading,
   appendLine,
-  bearing,
   departureHeading,
   haversine,
   minDistToLine,
@@ -26,6 +25,7 @@ import type {
   RouteSuccess,
   Sheet,
   TurnaroundPin,
+  TurnMark,
   Warning,
 } from "./types";
 
@@ -709,6 +709,7 @@ async function routeFrom(
   const warnings: Warning[] = [];
   const legs: RouteLeg[] = [];
   const turnarounds: TurnaroundPin[] = [];
+  const turnMarks: TurnMark[] = [];
   const anchors: { key: string; coord: LonLat; at: number }[] = [];
   const coords: LonLat[] = [[start.coord[0], start.coord[1]]];
   let node = start;
@@ -849,6 +850,15 @@ async function routeFrom(
       currentKey = target.how === "missing" ? currentKey : target.key;
       const at = Math.max(0, coords.length - 1);
       anchors.push({ key: target.key, coord: walk.far, at });
+      const farAt = nearestIndexFrom(coords, walk.far, at - walk.coords.length);
+      turnMarks.push({
+        stopIndex,
+        maneuverIndex,
+        kind: "turnaround",
+        street: maneuver.street,
+        trackIndex: farAt,
+        confirmed: walk.how !== "fallback" && walk.how !== "capped",
+      });
       turnarounds.push({
         id: pinId,
         stopIndex,
@@ -922,6 +932,15 @@ async function routeFrom(
       if (target.how !== "missing") {
         const turn = chooseTurn(node, heading, target.key, dir, graph);
         if (turn) {
+          // The intersection the bus turns at is the current end of the track.
+          turnMarks.push({
+            stopIndex,
+            maneuverIndex,
+            kind: dir,
+            street: maneuver.street,
+            trackIndex: coords.length - 1,
+            confirmed: !usedClosestConnection,
+          });
           appendLine(coords, turn.edge.coords, 0.4);
           node = graph.nodes.get(turn.edge.to) ?? node;
           heading = arrivalHeading(turn.edge.coords);
@@ -979,7 +998,12 @@ async function routeFrom(
   }
 
   // A tap that never landed on the street being driven still has to move the track.
-  await pullVias(coords, vias, router, (level, message) => warn(level, -1, -1, message));
+  const inserted = await pullVias(coords, vias, router, (level, message) => warn(level, -1, -1, message));
+  // Via detours are spliced into the track; keep recorded indices on the same points.
+  for (const { at, count } of inserted) {
+    for (const anchor of anchors) if (anchor.at >= at) anchor.at += count;
+    for (const mark of turnMarks) if (mark.trackIndex >= at) mark.trackIndex += count;
+  }
   const viaStreets = (overrides.vias ?? []).map((v) => nearestStreetName(graph, [v.lon, v.lat]));
 
   // These graph edges are deliberate straight-line guesses across missing tile geometry.
@@ -1029,13 +1053,14 @@ async function routeFrom(
   const placement = placeStops(sheet, coords, anchors, graph, available, places);
   warnings.push(...placement.warnings);
   const meters = polylineMeters(coords);
-  const gpx = buildGpx(sheet, coords, placement.stops);
+  const gpx = buildGpx(sheet, coords, placement.stops, turnMarks);
   return {
     ok: true,
     coords,
     meters,
     miles: meters / 1609.344,
     stops: placement.stops,
+    turnMarks,
     warnings,
     turnarounds,
     legs,
@@ -1071,7 +1096,8 @@ async function pullVias(
   vias: { lat: number; lon: number; used: boolean }[],
   router: Router | undefined,
   note: (level: Warning["level"], message: string) => void,
-) {
+): Promise<{ at: number; count: number }[]> {
+  const inserted: { at: number; count: number }[] = [];
   for (const via of vias) {
     const point: LonLat = [via.lon, via.lat];
     if (coords.length < 2) continue;
@@ -1095,17 +1121,18 @@ async function pullVias(
       }
     }
     if (path) {
-      insertOutAndBack(coords, point, path);
+      inserted.push(insertOutAndBack(coords, point, path));
       note("info", "The track now passes along mapped roads through the point you added.");
     } else {
-      insertOutAndBack(coords, point, [point]);
+      inserted.push(insertOutAndBack(coords, point, [point]));
       note("warn", "Couldn't find a drivable connection to the point you added. The track uses straight lines to and from it. Check this section before exporting.");
     }
     via.used = true;
   }
+  return inserted;
 }
 
-function insertOutAndBack(coords: LonLat[], point: LonLat, path: LonLat[]) {
+function insertOutAndBack(coords: LonLat[], point: LonLat, path: LonLat[]): { at: number; count: number } {
   let bestI = 1;
   let bestD = Infinity;
   let bestPoint: LonLat = coords[0];
@@ -1120,6 +1147,21 @@ function insertOutAndBack(coords: LonLat[], point: LonLat, path: LonLat[]) {
   const mid = path.length > 2 ? path.slice(1, -1) : path;
   const chunk = [bestPoint, ...mid, bestPoint].filter((p, i, arr) => i === 0 || haversine(arr[i - 1], p) > 0.6);
   coords.splice(bestI, 0, ...chunk);
+  return { at: bestI, count: chunk.length };
+}
+
+/** Index of the track point nearest [point], searching forward from [from]. */
+function nearestIndexFrom(coords: LonLat[], point: LonLat, from: number): number {
+  let best = Math.max(0, coords.length - 1);
+  let bestD = Infinity;
+  for (let i = Math.max(0, from); i < coords.length; i++) {
+    const d = haversine(coords[i], point);
+    if (d < bestD) {
+      bestD = d;
+      best = i;
+    }
+  }
+  return best;
 }
 
 function placeStops(

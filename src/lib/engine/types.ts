@@ -106,6 +106,18 @@ export type RouteLeg = {
   meters: number;
 };
 
+/** Where the router made a printed turn, on the finished track. */
+export type TurnMark = {
+  stopIndex: number;
+  maneuverIndex: number;
+  kind: "left" | "right" | "turnaround";
+  street: string;
+  /** Index into the track coordinate array. */
+  trackIndex: number;
+  /** False when the router used the closest connection or a guessed turnaround spot. */
+  confirmed: boolean;
+};
+
 export type RouteSuccess = {
   ok: true;
   coords: LonLat[];
@@ -115,6 +127,8 @@ export type RouteSuccess = {
   warnings: Warning[];
   turnarounds: TurnaroundPin[];
   legs: RouteLeg[];
+  /** Exact track positions of the printed turns, in driving order. */
+  turnMarks: TurnMark[];
   gpx: string;
   /** Street nearest each via, in the same order as the taps. Empty when no road was close. */
   viaStreets: string[];

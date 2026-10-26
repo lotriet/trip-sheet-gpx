@@ -1228,7 +1228,7 @@ export function TripApp() {
   function shareCurrentRoute() {
     if (!route) return;
     const name = runFileName(0, { run: sheet.run, description: sheet.description, firstTime: sheet.stops[0]?.time ?? "" });
-    void deliverGpx([{ name, text: buildGpx(sheet, route.coords, route.stops) }], name, "single");
+    void deliverGpx([{ name, text: buildGpx(sheet, route.coords, route.stops, route.turnMarks) }], name, "single");
   }
 
   async function shareAll() {
