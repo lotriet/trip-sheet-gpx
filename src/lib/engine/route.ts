@@ -119,6 +119,45 @@ function lineNear(coords: LonLat[], point: LonLat, maxM: number): boolean {
   return minDistToLine(point, coords).d <= maxM;
 }
 
+type MappedRoad = { coords: LonLat[]; minLon: number; maxLon: number; minLat: number; maxLat: number };
+
+/** Real (not synthetic) road geometry with bounding boxes, for quick nearness checks. */
+function mappedRoadIndex(graph: Graph): MappedRoad[] {
+  const out: MappedRoad[] = [];
+  for (const edge of graph.edges) {
+    if (edge.synthetic || edge.coords.length < 2) continue;
+    let minLon = Infinity, maxLon = -Infinity, minLat = Infinity, maxLat = -Infinity;
+    for (const [lon, lat] of edge.coords) {
+      if (lon < minLon) minLon = lon;
+      if (lon > maxLon) maxLon = lon;
+      if (lat < minLat) minLat = lat;
+      if (lat > maxLat) maxLat = lat;
+    }
+    out.push({ coords: edge.coords, minLon, maxLon, minLat, maxLat });
+  }
+  return out;
+}
+
+/** Every point along [line] lies within a few meters of mapped road. */
+function overliesMappedRoad(line: LonLat[], roads: MappedRoad[], tolerance = 4): boolean {
+  const pad = 0.0001; // about 10 m
+  for (let i = 0; i < line.length - 1; i++) {
+    const a = line[i];
+    const b = line[i + 1];
+    const steps = Math.max(2, Math.ceil(haversine(a, b) / 8));
+    for (let s = 1; s < steps; s++) {
+      const t = s / steps;
+      const p: LonLat = [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
+      const covered = roads.some((road) =>
+        p[0] >= road.minLon - pad && p[0] <= road.maxLon + pad && p[1] >= road.minLat - pad && p[1] <= road.maxLat + pad &&
+        minDistToLine(p, road.coords).d <= tolerance,
+      );
+      if (!covered) return false;
+    }
+  }
+  return true;
+}
+
 function trackUsesLine(track: LonLat[], line: LonLat[]): boolean {
   if (track.length < 2 || line.length < 2) return false;
   const a = line[0];
@@ -1021,8 +1060,12 @@ async function routeFrom(
   // These graph edges are deliberate straight-line guesses across missing tile geometry.
   // Require a visible warning whenever the actual route uses one.
   const syntheticSeen = new Set<string>();
+  const mapped = mappedRoadIndex(graph);
   for (const edge of graph.edges) {
     if (!edge.synthetic || edge.coords.length < 2) continue;
+    // A bridge laid over road the map already has (tile pieces that overlap)
+    // is not an assumed connection: the bus drives mapped road there.
+    if (overliesMappedRoad(edge.coords, mapped)) continue;
     const a = edge.coords[0];
     const b = edge.coords.at(-1)!;
     const mid: LonLat = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
@@ -1287,8 +1330,9 @@ export async function routeSheet(
     }
   }
   const lineKeys = new Set(graphLines.flatMap((l) => l.keys));
-  graphLines.push(...gapLinks(meetingPairs(sheet, lineKeys, data.places), graphLines));
-  const graph = buildGraph(graphLines, linkKeys);
+  const pairs = meetingPairs(sheet, lineKeys, data.places);
+  graphLines.push(...gapLinks(pairs, graphLines));
+  const graph = buildGraph(graphLines, linkKeys, new Set(pairs.map((p) => [...p].sort().join("|"))));
   const available = keysInGraph(graph);
   // Where the track starts: the first stop, or, when the map can't place it,
   // the next stop that it can (the start is then flagged for the driver to check).
