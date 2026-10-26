@@ -78,7 +78,12 @@ export function nodeHas(node: GraphNode, key: string): boolean {
   return node.out.some((e) => edgeServes(e, key));
 }
 
-export function buildGraph(input: GraphLine[], linkKeys?: Set<string>): Graph {
+/**
+ * [meets] lists street pairs the sheet expects to meet ("a|b", keys sorted).
+ * Where two such streets cross with no shared point in the tiles, the
+ * crossing becomes a junction. Other crossings may be overpasses and stay apart.
+ */
+export function buildGraph(input: GraphLine[], linkKeys?: Set<string>, meets?: Set<string>): Graph {
   const pls = input
     .filter((l) => l.coords.length >= 2 && l.keys.length)
     .map((l) => ({
@@ -141,6 +146,7 @@ export function buildGraph(input: GraphLine[], linkKeys?: Set<string>): Graph {
     }
   }
 
+  if (meets?.size) splitCrossings(pls, splits, segGrid, meets);
   const connectors = linkKeys?.size ? linkNearMisses(pls, splits, segGrid, linkKeys) : [];
 
   for (let pi = 0; pi < pls.length; pi++) {
@@ -351,6 +357,49 @@ function linkNearMisses(
 
 
 /**
+ * Two streets that cross mid-segment, with no vertex at the crossing, share no
+ * node, so no turn between them is possible. Split both at the crossing point
+ * when the sheet expects the streets to meet.
+ */
+function splitCrossings(
+  pls: { keys: string[]; coords: LonLat[] }[],
+  splits: { t: number; point: LonLat }[][][],
+  segGrid: Map<string, { pi: number; si: number }[]>,
+  meets: Set<string>,
+) {
+  const pairMeets = (a: string[], b: string[]) =>
+    a.some((ka) => b.some((kb) => ka !== kb && meets.has([ka, kb].sort().join("|"))));
+  const done = new Set<string>();
+  for (let pi = 0; pi < pls.length; pi++) {
+    const coords = pls[pi].coords;
+    for (let si = 0; si < coords.length - 1; si++) {
+      const a = coords[si];
+      const b = coords[si + 1];
+      const steps = Math.max(1, Math.ceil(haversine(a, b) / 12));
+      for (let s = 0; s <= steps; s++) {
+        const t = s / steps;
+        for (const ck of nearbyKeys([a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t])) {
+          for (const seg of segGrid.get(ck) ?? []) {
+            if (seg.pi <= pi) continue;
+            const tag = `${pi}:${si}|${seg.pi}:${seg.si}`;
+            if (done.has(tag)) continue;
+            done.add(tag);
+            if (!pairMeets(pls[pi].keys, pls[seg.pi].keys)) continue;
+            const c = pls[seg.pi].coords[seg.si];
+            const d = pls[seg.pi].coords[seg.si + 1];
+            const hit = segmentApproach(a, b, c, d);
+            if (hit.distance > 0.5 || hit.t <= 0.001 || hit.t >= 0.999 || hit.u <= 0.001 || hit.u >= 0.999) continue;
+            const point: LonLat = [hit.p[0], hit.p[1]];
+            splits[pi][si].push({ t: hit.t, point });
+            splits[seg.pi][seg.si].push({ t: hit.u, point: [point[0], point[1]] });
+          }
+        }
+      }
+    }
+  }
+}
+
+/**
  * OpenMapTiles sometimes drops a short piece of a road. Join dead-ends of the
  * same street when they face each other across a gap of a few hundred meters.
  * Lateral jumps between the two sides of a divided road fail the heading test.
@@ -366,15 +415,26 @@ function bridgeNamedGaps(
   const seen = new Set<string>();
 
   for (const key of keys) {
-    const ends: { node: GraphNode; heading: number }[] = [];
+    // A road end has one neighbor on this street counting both directions.
+    // Counting only outgoing edges made every node of a one-way road (each
+    // carriageway of a divided road) an "end", which bridged the carriageways
+    // with invented straight links.
+    const outsOf = new Map<string, GraphEdge[]>();
+    const insOf = new Map<string, GraphEdge[]>();
+    for (const e of edges) {
+      if (!e.keys.includes(key) || e.synthetic) continue;
+      outsOf.set(e.from, [...(outsOf.get(e.from) ?? []), e]);
+      insOf.set(e.to, [...(insOf.get(e.to) ?? []), e]);
+    }
+    const ends: { node: GraphNode; heading: number; arrives: boolean; leaves: boolean }[] = [];
     for (const n of nodes.values()) {
-      const outs = n.out.filter((e) => e.keys.includes(key));
-      const neighbors = new Set(outs.map((e) => e.to));
-      if (neighbors.size !== 1 || !outs.length) continue;
-      const back = outs[0];
-      const inbound = edges.find((e) => e.to === n.id && e.from === back.to && e.keys.includes(key));
-      const heading = inbound ? arrivalHeading(inbound.coords) : (arrivalHeading(back.coords) + 180) % 360;
-      ends.push({ node: n, heading });
+      const outs = outsOf.get(n.id) ?? [];
+      const ins = insOf.get(n.id) ?? [];
+      const neighbors = new Set([...outs.map((e) => e.to), ...ins.map((e) => e.from)]);
+      if (neighbors.size !== 1) continue;
+      // Heading pointing out of the end, away from the road behind it.
+      const heading = ins.length ? arrivalHeading(ins[0].coords) : (arrivalHeading(outs[0].coords) + 180) % 360;
+      ends.push({ node: n, heading, arrives: ins.length > 0, leaves: outs.length > 0 });
     }
     for (let i = 0; i < ends.length; i++) {
       for (let j = i + 1; j < ends.length; j++) {
@@ -389,17 +449,20 @@ function bridgeNamedGaps(
         const sig = [a.node.id, b.node.id].sort().join("|") + key;
         if (seen.has(sig)) continue;
         seen.add(sig);
-        const name = a.node.out.find((e) => e.keys.includes(key))?.name ?? key;
+        const name = (outsOf.get(a.node.id) ?? insOf.get(a.node.id))?.[0]?.name ?? key;
         const coords: LonLat[] = [a.node.coord, b.node.coord];
         const rev: LonLat[] = [b.node.coord, a.node.coord];
+        // A bridge may only be driven the way the road runs: from an end the
+        // road arrives at to an end the road leaves from.
         for (const [from, to, line] of [
-          [a.node, b.node, coords],
-          [b.node, a.node, rev],
+          [a, b, coords],
+          [b, a, rev],
         ] as const) {
+          if (!from.arrives || !to.leaves) continue;
           const edge: GraphEdge = {
             id: nextId(),
-            from: from.id,
-            to: to.id,
+            from: from.node.id,
+            to: to.node.id,
             keys: [key],
             name,
             coords: line.map((c) => [c[0], c[1]]),
@@ -407,7 +470,7 @@ function bridgeNamedGaps(
             synthetic: "same-road-gap",
           };
           edges.push(edge);
-          from.out.push(edge);
+          from.node.out.push(edge);
         }
         bridges++;
       }
