@@ -13,7 +13,16 @@ import { classifyLocation, parseSheet, ROUTE_HEADING, RUN_HEADING } from "./engi
 import type { Sheet, Stop } from "./engine/types";
 
 /** One page of text: a photo, part of a photo, or pasted text. `photo` is -1 for pasted text. */
-export type PageRead = { photo: number; name: string; text: string; thumb?: string };
+export type PageRead = {
+  photo: number;
+  name: string;
+  text: string;
+  thumb?: string;
+  /** The page footer was never read; the bottom of the page may be missing. */
+  incomplete?: boolean;
+  /** The load column lists this many more stops than were read. */
+  missingStops?: number;
+};
 
 export type PageInfo = PageRead & {
   /** "123.456", or null when the header couldn't be read. */

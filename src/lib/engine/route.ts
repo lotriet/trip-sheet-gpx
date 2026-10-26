@@ -1458,7 +1458,12 @@ export async function routeSheet(
     best = await routeFrom(graph, sheet, bestStart, available, data.places, overrides, router);
   }
   if (!best || best.coords.length < 2) {
-    return { ok: false, error: "The streets on the sheet did not connect into a route.", warnings: best?.warnings ?? [] };
+    // Name the streets the map didn't have: they are almost always the reason.
+    const missing = [...new Set((best?.warnings ?? []).flatMap((w) => w.message.match(/^Couldn't find “(.+)” in the map/)?.[1] ?? []))];
+    const error = missing.length
+      ? `Couldn't find ${missing.map((m) => `“${m}”`).join(", ")} on the map for this area, so the streets don't connect. Check the spelling (streets marked with a red ?), or the Area.`
+      : "The streets on the sheet did not connect into a route. Check the directions marked with a red ?, or the Area.";
+    return { ok: false, error, warnings: best?.warnings ?? [] };
   }
   if (startAt !== 0) {
     best.warnings.unshift({
