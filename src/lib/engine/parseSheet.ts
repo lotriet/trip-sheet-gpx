@@ -6,6 +6,8 @@ const BOILER =
 
 function cleanLine(s: string): string {
   return s
+    // Typed and converted sheets separate fields with en or em dashes.
+    .replace(/[\u2013\u2014\u2212]/g, "-")
     .replace(/[|]/g, " ")
     .replace(/[[\]{}]/g, "")
     .replace(/\btu[mn]\b/gi, "Turn")
@@ -135,8 +137,20 @@ export function classifyLocation(description: string): StopLocation {
 
 type ParsingStop = Stop & { wrapped?: number };
 
+/** "Run 900.101 - OAK HS 01" (dashes are normalized by cleanLine; raw text may still have en dashes). */
+export const RUN_HEADING = /^\s*run\s+(\d{3}\.\d{3})\s*[-\u2013\u2014]\s*(.+?)\s*$/im;
+export const ROUTE_HEADING = /^\s*route\s+([A-Za-z0-9.]+)\s*[-\u2013\u2014]/im;
+
+/** "- SCHOOL: OAK HS (start)": the field dash and a start/end note are not part of the place. */
+function stripStopNotes(description: string): string {
+  return description
+    .replace(/^\s*-+\s*/, "")
+    .replace(/\s*\((?:start|end)\)\s*$/i, "")
+    .trim();
+}
+
 function emptyStop(time: string, description: string): ParsingStop {
-  const peeled = peelTail(description);
+  const peeled = peelTail(stripStopNotes(description));
   return {
     time,
     description: peeled.text,
@@ -153,10 +167,14 @@ function emptyStop(time: string, description: string): ParsingStop {
  */
 export function parseSheet(raw: string): Sheet {
   const text = raw.replace(/\r/g, "");
-  const route = text.match(/route\s*:\s*([A-Za-z0-9.-]+)/i)?.[1]?.trim() ?? "";
-  const run = text.match(/\brun\s*:\s*([0-9]+(?:\.[0-9]+)?)/i)?.[1]?.trim() ?? "";
+  // A converted sheet titles each run "Run 900.101 - OAK HS 01" and the
+  // page "Route DEMO42 - Trip Sheet Directions" instead of "Run:" fields.
+  const runHeading = text.match(RUN_HEADING);
+  const route =
+    text.match(/route\s*:\s*([A-Za-z0-9.-]+)/i)?.[1]?.trim() ?? text.match(ROUTE_HEADING)?.[1]?.trim() ?? "";
+  const run = text.match(/\brun\s*:\s*([0-9]+(?:\.[0-9]+)?)/i)?.[1]?.trim() ?? runHeading?.[1]?.trim() ?? "";
   const description =
-    text.match(/description\s*:\s*([^\n]+?)(?=\s+run\s*:|\s*$)/im)?.[1]?.trim() ?? "";
+    text.match(/description\s*:\s*([^\n]+?)(?=\s+run\s*:|\s*$)/im)?.[1]?.trim() ?? runHeading?.[2]?.trim() ?? "";
 
   const stops: ParsingStop[] = [];
   let current: ParsingStop | null = null;
@@ -174,6 +192,7 @@ export function parseSheet(raw: string): Sheet {
     if (!line) continue;
     if (BOILER.test(line)) continue;
     if (/^(route|description|run)\s*:/i.test(line) && !/\d{1,2}:\d{2}/.test(line)) continue;
+    if (RUN_HEADING.test(line) || ROUTE_HEADING.test(line)) continue;
 
     const time = line.match(/^(\d{1,2}:\d{2})\s*([AP]M)\b\s*(.*)$/i);
     if (time) {
@@ -219,7 +238,7 @@ export function parseSheet(raw: string): Sheet {
   // Drop a trailing empty stop created from a stray time, but keep real stops with no maneuvers (end of run).
   return {
     route,
-    description: description.replace(/\s+run\s*:.*$/i, "").trim(),
+    description: description.replace(/\s+run\s*:.*$/i, "").replace(/\s+run\s*$/i, "").trim(),
     run,
     stops: expandStopNames(
       stops

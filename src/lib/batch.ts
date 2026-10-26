@@ -8,7 +8,8 @@
  */
 
 import { schoolSig } from "./engine/names";
-import { classifyLocation, parseSheet } from "./engine/parseSheet";
+import { editDistance } from "./engine/route";
+import { classifyLocation, parseSheet, ROUTE_HEADING, RUN_HEADING } from "./engine/parseSheet";
 import type { Sheet, Stop } from "./engine/types";
 
 /** One page of text: a photo, part of a photo, or pasted text. `photo` is -1 for pasted text. */
@@ -182,6 +183,7 @@ export function buildTrips(pages: PageInfo[], keys: string[]): Trip[] {
     if (!byKey.has(k)) byKey.set(k, []);
     byKey.get(k)!.push(p);
   });
+  const route = commonRoute(pages);
   const trips: Trip[] = [];
   for (const [key, group] of byKey) {
     const ordered = orderPages(group);
@@ -189,6 +191,8 @@ export function buildTrips(pages: PageInfo[], keys: string[]): Trip[] {
     const sheet = sortStopsByTime(parseSheet(text));
     const run = /^\d{3}\.\w{3}$/.test(key) ? key : sheet.run;
     if (run) sheet.run = run;
+    // One misread page ("GHy715") takes the route the other pages agree on.
+    if (route && sheet.route !== route && (!sheet.route || editDistance(sheet.route.toUpperCase(), route) <= 2)) sheet.route = route;
     const firstTime = sheet.stops.find((s) => s.time)?.time ?? "";
     trips.push({
       key,
@@ -207,6 +211,19 @@ export function buildTrips(pages: PageInfo[], keys: string[]): Trip[] {
     if (b.firstMinutes == null) return -1;
     return a.firstMinutes - b.firstMinutes;
   });
+}
+
+/** The route printed on most pages, when at least two pages agree. */
+function commonRoute(pages: PageInfo[]): string {
+  const counts = new Map<string, number>();
+  for (const page of pages) {
+    const route = parseSheet(page.text).route.toUpperCase();
+    if (route) counts.set(route, (counts.get(route) ?? 0) + 1);
+  }
+  let best = "";
+  let bestCount = 1;
+  for (const [route, count] of counts) if (count > bestCount) [best, bestCount] = [route, count];
+  return best;
 }
 
 /** A key for a trip the user makes by moving a page out of its group. */
@@ -334,9 +351,15 @@ export function splitRuns(text: string): string[] {
   let lastContent = -1; // last time or direction line
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
+    if (seenStop && RUN_HEADING.test(line)) {
+      // "Run 900.102 - ..." titles the next run on a converted sheet.
+      cuts.push(i);
+      seenStop = false;
+      continue;
+    }
     const t = line.match(TIME_LINE);
     if (t) {
-      if (seenStop && /^\s*deadhead\b/i.test(t[3])) {
+      if (seenStop && /^\s*[-\u2013\u2014:]*\s*deadhead\b/i.test(t[3])) {
         // Header lines between the last direction and this Deadhead belong to the new run.
         cuts.push(lastContent + 1);
       }
@@ -349,11 +372,14 @@ export function splitRuns(text: string): string[] {
   if (!cuts.length) return [text];
   const out: string[] = [];
   let from = 0;
-  for (const c of cuts) {
+  for (const c of [...new Set(cuts)].sort((a, b) => a - b)) {
     out.push(lines.slice(from, c).join("\n"));
     from = c;
   }
   out.push(lines.slice(from).join("\n"));
-  // A chunk without a run header inherits nothing; the run number, if any, comes from its own header.
+  // A converted sheet prints "Route DEMO42 - ..." once at the top; every run on it shares that route.
+  const routeLine = lines.slice(0, cuts[0]).find((l) => ROUTE_HEADING.test(l));
+  if (routeLine) for (let k = 1; k < out.length; k++) if (!ROUTE_HEADING.test(out[k])) out[k] = `${routeLine}\n${out[k]}`;
+  // Otherwise a chunk without a run header inherits nothing; the run number, if any, comes from its own header.
   return out.filter((c) => c.trim());
 }

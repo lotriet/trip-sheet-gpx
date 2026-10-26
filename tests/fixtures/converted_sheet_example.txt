@@ -1,0 +1,66 @@
+Route DEMO42 – Trip Sheet Directions
+
+Directions listed under each stop are the turns to drive from that stop to the next one.
+
+Run 900.101 – OAK HS 01
+
+06:10 AM – 1 OAK HS (start)
+
+Proceed On OAK HS
+Right Turn Onto MAPLE AVE
+Left Turn Onto ELM ST
+Turn Around On ELM ST
+
+06:20 AM – ELM ST & BIRCH LN – DOORSIDE
+
+Proceed On ELM ST
+Right Turn Onto CEDAR CT
+Turn Around On CEDAR CT
+
+06:25 AM – CEDAR CT @ THE END OF SIDEWALK
+
+Proceed On CEDAR CT
+Left Turn Onto ELM ST
+Right Turn Onto OAK HS
+
+06:35 AM – SCHOOL: OAK HS (end)
+
+Run 900.102 – OAK HS 02 (DB)
+
+06:35 AM – DEADHEAD – SCHOOL: OAK HS (start)
+
+Proceed On OAK HS
+Left Turn Onto MAPLE AVE
+Proceed Onto ROUNDABOUT
+Proceed Onto MAPLE AVE
+Right Turn Onto WILLOW DR
+
+06:42 AM – WILLOW DR & ASPEN WAY – DOORSIDE
+
+Proceed On WILLOW DR
+
+06:44 AM – WILLOW DR & HAZEL CT
+
+Left Turn Onto HAZEL CT
+Turn Around On HAZEL CT
+Right Turn Onto WILLOW DR
+Left Turn Onto MAPLE AVE
+Right Turn Onto OAK HS
+
+06:55 AM – SCHOOL: OAK HS (end)
+
+Run 900.203 – PINE MS 03
+
+07:20 AM – DEADHEAD – SCHOOL: OAK HS (start)
+
+Proceed On OAK HS
+Right Turn Onto MAPLE AVE
+Right Turn Onto SPRUCE RD
+
+07:28 AM – SPRUCE RD & JUNIPER LN
+
+Left Turn Onto JUNIPER LN
+Right Turn Onto PINE MS
+Turn Around On PINE MS
+
+07:35 AM – SCHOOL: PINE MS (end)
