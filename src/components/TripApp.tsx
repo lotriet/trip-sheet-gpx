@@ -6,7 +6,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalS
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { EXAMPLE_SHEET_TEXT } from "@/lib/exampleSheet";
-import { buildDayGpx, runFileName, type DeadheadLeg } from "@/lib/dayPlan";
+import { buildDayGpx, lacksTurnPoints, runFileName, type DeadheadLeg } from "@/lib/dayPlan";
 import { driveBetween } from "@/lib/engine/drive";
 import { buildGpx } from "@/lib/engine/gpx";
 import { classifyLocation, parseSheet } from "@/lib/engine/parseSheet";
@@ -1479,6 +1479,11 @@ export function TripApp() {
                   )}
                   <Button type="button" variant="outline" className="mt-2 h-9 border-[#e5c981] bg-white px-3 text-sm font-semibold text-[#68470b]" onClick={() => openEdit(run)} disabled={exportingDay}>{run.warningsAcknowledged ? "Recheck route" : "Review warnings"}</Button>
                 </div>
+              )}
+              {lacksTurnPoints(run.gpx) && (
+                <p className="mt-2 rounded-lg border border-[#e5c981] bg-[#fff8e6] px-3 py-2 text-sm text-[#463716]">
+                  Built before exact turn points. Tap Edit and build it again so GPX Nav gets each turn’s exact spot.
+                </p>
               )}
               {(run.vias?.length ?? 0) > 0 && (
                 <p className="mt-2 text-sm text-[#3d4b63]">
