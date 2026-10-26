@@ -56,3 +56,12 @@ test("the day file keeps each run's directions and turn points", async () => {
   assert.equal(runGpxParts(day).turns.size, 2);
   assert.match(day, /<desc>DEMO run 900\.101\. [^<]*Left on Birch Ln\.<\/desc>/);
 });
+
+test("a run saved before turn points is flagged for a rebuild", async () => {
+  const { lacksTurnPoints } = await import("../src/lib/dayPlan");
+  const result = await routeSheet(sheet, { lines, places: [] });
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+  assert.equal(lacksTurnPoints(result.gpx), false);
+  assert.equal(lacksTurnPoints(result.gpx.replace(/<trkpt ([^>]*)><name>[^<]*<\/name><type>[^<]*<\/type><\/trkpt>/g, "<trkpt $1/>")), true);
+});

@@ -24,6 +24,14 @@ export type DayRunTrack = {
 type DayPoint = { point: LonLat; turn?: string };
 
 /**
+ * A run GPX saved before turn points were written: it has printed turns but no
+ * `<trkpt>` marking where they happen. Building it again adds them.
+ */
+export function lacksTurnPoints(gpx: string): boolean {
+  return /<desc>[^<]*\b(?:Left on|Right on|Turn around on)\b/.test(gpx) && !/<type>turn/.test(gpx);
+}
+
+/**
  * Stop directions and turn-point markup from a run GPX built by `buildGpx`.
  * Values stay XML-escaped, as they were written.
  */
