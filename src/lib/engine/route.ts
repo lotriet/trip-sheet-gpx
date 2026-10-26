@@ -1150,7 +1150,8 @@ async function routeFrom(
     const b = edge.coords.at(-1)!;
     const location: LonLat = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
     warn(
-      "warn",
+      // A general caution about the map, not a problem on this route to fix.
+      "info",
       -1,
       -1,
       `One-way direction data could not be confidently matched for ${visible || "one or more named roads"}${extra}. Check road signs along this route.`,

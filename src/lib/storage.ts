@@ -38,13 +38,21 @@ function openDb(): Promise<IDBDatabase> {
   });
 }
 
+/** Runs saved before the one-way caution became a note keep it as a warning; make it a note. */
+export function upgradeSavedRun(run: SavedRun): SavedRun {
+  const warnings = run.warnings.map((w) =>
+    w.level === "warn" && w.message.startsWith("One-way direction data could not be confidently matched") ? { ...w, level: "info" as const } : w,
+  );
+  return { ...run, warnings };
+}
+
 export async function loadDay(): Promise<SavedRun[]> {
   const db = await openDb();
   try {
     return await new Promise((resolve, reject) => {
       const tx = db.transaction(STORE, "readonly");
       const req = tx.objectStore(STORE).get(KEY);
-      req.onsuccess = () => resolve(Array.isArray(req.result) ? (req.result as SavedRun[]) : []);
+      req.onsuccess = () => resolve(Array.isArray(req.result) ? (req.result as SavedRun[]).map(upgradeSavedRun) : []);
       req.onerror = () => reject(req.error);
       tx.onabort = () => reject(tx.error ?? new Error("Couldn't read the saved day."));
     });
