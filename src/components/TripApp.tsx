@@ -223,11 +223,26 @@ export function TripApp() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [view, sheet, overrides]);
   const revealMapAfterBuild = useRef(false);
+  // "Save changes" on a saved run: build, then put the result straight back on the list.
+  const saveAfterBuild = useRef(false);
+  useEffect(() => {
+    if (view !== "preview" || !route || !saveAfterBuild.current) return;
+    saveAfterBuild.current = false;
+    saveToDay();
+    // saveToDay reads the route this effect waits for.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [view, route]);
+  useEffect(() => {
+    if (error) saveAfterBuild.current = false;
+  }, [error]);
   useEffect(() => {
     if (view !== "preview" || !revealMapAfterBuild.current) return;
     revealMapAfterBuild.current = false;
     requestAnimationFrame(() => document.querySelector("[data-route-map]")?.scrollIntoView({ behavior: "smooth", block: "center" }));
   }, [view, route]);
+
+  /** The editor holds a run already on today's list, so saving replaces it. */
+  const editingSavedRun = !!editingId && !reviewKey && runs.some((run) => run.id === editingId);
 
   const unreviewedRuns = useMemo(
     () => runs.filter((run) => !run.warningsAcknowledged && run.warnings.some((warning) => warning.level === "warn")),
@@ -2146,11 +2161,11 @@ export function TripApp() {
               {error && <p className="text-sm text-[#7f1d1d]" role="alert">{error}</p>}
               <div className="flex gap-2">
                 <Button type="button" variant="outline" className="h-11 flex-1 rounded-xl border-[#dce3ec] bg-[#f8fafc] text-sm font-semibold" onClick={saveDraftAndBack}>
-                  {reviewTrip ? "Back to trips" : draftActive && (sheet.stops.length > 0 || text.trim()) ? "Save draft & back" : "Back"}
+                  {reviewTrip ? "Back to trips" : draftActive && (sheet.stops.length > 0 || text.trim()) ? "Keep as draft & back" : "Back"}
                 </Button>
-                <Button type="button" className="h-11 flex-[2] rounded-xl bg-[#173b64] text-sm font-bold text-white shadow-sm disabled:opacity-100" disabled={(!sheet.stops.length && !text.trim()) || routeBuilding || !!status} onClick={() => void generate()}>
+                <Button type="button" className="h-11 flex-[2] rounded-xl bg-[#173b64] text-sm font-bold text-white shadow-sm disabled:opacity-100" disabled={(!sheet.stops.length && !text.trim()) || routeBuilding || !!status} onClick={() => { saveAfterBuild.current = editingSavedRun; void generate(); }}>
                   {routeBuilding && <LoaderCircle aria-hidden="true" className="mr-2 inline h-4 w-4 animate-spin" />}
-                  {routeBuilding ? "Building route…" : "Build the route"}
+                  {routeBuilding ? "Building route…" : editingSavedRun ? "Save changes" : "Build the route"}
                 </Button>
               </div>
             </div>
@@ -2364,7 +2379,7 @@ export function TripApp() {
                     </div>
                   ) : (
                     <Button type="button" className="h-11 rounded-xl bg-[#173b64] text-sm font-bold text-white shadow-sm" disabled={routeBuilding || !!status} onClick={saveToDay}>
-                      Add to today’s list
+                      {editingSavedRun ? "Save changes" : "Add to today’s list"}
                     </Button>
                   )}
                   <div className="grid grid-cols-2 gap-2">
