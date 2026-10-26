@@ -1410,8 +1410,11 @@ export function TripApp() {
       setStatus("");
       const gpx = buildDayGpx(exportRuns, deadheads);
       const name = `day_${exportRuns.length}_runs.gpx`;
-      // Routing the deadheads took too long to share on this tap; the notice's button sends it.
-      setGpxNotice({ files: [{ name, text: gpx }], title: name, source: "day", state: "ready", note: dayNote(deadheads, exportRuns.length) });
+      const notice: GpxNotice = { files: [{ name, text: gpx }], title: name, source: "day", state: "ready", note: dayNote(deadheads, exportRuns.length) };
+      // GPX Nav takes the file without a tap. In a browser, routing the deadheads
+      // took too long to share on this tap, so the notice's button sends it.
+      if (window.TripNavGPX) await deliverGpx(notice);
+      else setGpxNotice(notice);
     } catch (err) {
       setError(err instanceof Error ? err.message : "The day’s GPX could not be built.");
     } finally {
