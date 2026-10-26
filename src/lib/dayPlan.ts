@@ -1,4 +1,4 @@
-import { appendLine, polylineMeters } from "./engine/geo";
+import { haversine, polylineMeters } from "./engine/geo";
 import { prettySheetText } from "./engine/gpx";
 import type { LonLat } from "./engine/types";
 
@@ -17,7 +17,28 @@ export type DayRunTrack = {
   firstTime: string;
   coords: LonLat[];
   stops: DayStop[];
+  /** The run's own GPX. Its stop directions and turn points are carried into the day file. */
+  gpx?: string;
 };
+
+type DayPoint = { point: LonLat; turn?: string };
+
+/**
+ * Stop directions and turn-point markup from a run GPX built by `buildGpx`.
+ * Values stay XML-escaped, as they were written.
+ */
+export function runGpxParts(gpx: string): { stopDescs: string[]; turns: Map<number, string> } {
+  const stopDescs = [...gpx.matchAll(/<wpt\b[^>]*>[\s\S]*?<\/wpt>/g)].map(
+    (m) => m[0].match(/<desc>([\s\S]*?)<\/desc>/)?.[1] ?? "",
+  );
+  const turns = new Map<number, string>();
+  let index = 0;
+  for (const m of gpx.matchAll(/<trkpt\b[^>]*?(?:\/>|>([\s\S]*?)<\/trkpt>)/g)) {
+    if (m[1] && /<type>turn/.test(m[1])) turns.set(index, m[1]);
+    index++;
+  }
+  return { stopDescs, turns };
+}
 
 export type DeadheadLeg = {
   coords: LonLat[];
@@ -67,17 +88,21 @@ export function buildDayGpx(runs: DayRunTrack[], deadheads: DeadheadLeg[]): stri
     )}</desc></metadata>`,
   ];
 
-  const segments: LonLat[][] = [[]];
+  const segments: DayPoint[][] = [[]];
   runs.forEach((run, i) => {
     const track = segments[segments.length - 1];
     const label = [run.route, run.run ? `run ${run.run}` : ""].filter(Boolean).join(" ");
-    run.stops.forEach((stop) => {
+    const parts = run.gpx ? runGpxParts(run.gpx) : null;
+    // A follower reads directions from each stop's description; without them the day has no turns.
+    const descs = parts && parts.stopDescs.length === run.stops.length ? parts.stopDescs : null;
+    run.stops.forEach((stop, k) => {
       const name = `Run ${i + 1} ${stop.time} ${prettySheetText(stop.description)}`.replace(/\s+/g, " ").trim();
+      const desc = descs?.[k] ? `${esc(label)}. ${descs[k]}` : esc(label);
       lines.push(
-        `<wpt lat="${stop.lat.toFixed(6)}" lon="${stop.lon.toFixed(6)}"><name>${esc(name)}</name><desc>${esc(label)}</desc><sym>Flag, Blue</sym></wpt>`,
+        `<wpt lat="${stop.lat.toFixed(6)}" lon="${stop.lon.toFixed(6)}"><name>${esc(name)}</name><desc>${desc}</desc><sym>Flag, Blue</sym></wpt>`,
       );
     });
-    appendLine(track, run.coords, 0.4);
+    appendDay(track, run.coords, parts?.turns);
     const link = deadheads[i];
     if (i < runs.length - 1) {
       const at = link?.coords[0] ?? run.coords.at(-1);
@@ -90,19 +115,32 @@ export function buildDayGpx(runs: DayRunTrack[], deadheads: DeadheadLeg[]): stri
           `<wpt lat="${at[1].toFixed(6)}" lon="${at[0].toFixed(6)}"><name>${esc(`DEADHEAD to run ${i + 2}`)}</name><desc>${esc(how)}</desc><sym>Flag, Blue</sym></wpt>`,
         );
       }
-      if (routed) appendLine(track, link!.coords, 0.4);
+      if (routed) appendDay(track, link!.coords);
       else segments.push([]);
     }
   });
 
-  const meters = segments.reduce((sum, segment) => sum + polylineMeters(segment), 0);
+  const meters = segments.reduce((sum, segment) => sum + polylineMeters(segment.map((p) => p.point)), 0);
   const miles = (meters / 1609.344).toFixed(2);
   lines.push(`<trk><name>${esc(`Day ${title}`)}</name><desc>${esc(`${runs.length} runs, ${miles} mi including deadheads`)}</desc><type>Car</type>`);
-  for (const [index, segment] of segments.entries()) {
+  for (const segment of segments) {
     lines.push(`<trkseg>`);
-    for (const [lon, lat] of segment) lines.push(`<trkpt lat="${lat.toFixed(6)}" lon="${lon.toFixed(6)}"/>`);
+    for (const { point, turn } of segment) {
+      const attrs = `lat="${point[1].toFixed(6)}" lon="${point[0].toFixed(6)}"`;
+      lines.push(turn ? `<trkpt ${attrs}>${turn}</trkpt>` : `<trkpt ${attrs}/>`);
+    }
     lines.push(`</trkseg>`);
   }
   lines.push(`</trk></gpx>`);
   return lines.join("\n") + "\n";
+}
+
+/** Like `appendLine`, keeping each source point's turn markup on the point that survives. */
+function appendDay(into: DayPoint[], add: LonLat[], turns?: Map<number, string>) {
+  add.forEach((p, k) => {
+    const turn = turns?.get(k);
+    const last = into.at(-1);
+    if (!last || haversine(last.point, p) > 0.4) into.push({ point: [p[0], p[1]], ...(turn ? { turn } : {}) });
+    else if (turn && !last.turn) last.turn = turn;
+  });
 }
