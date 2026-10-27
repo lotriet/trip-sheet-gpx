@@ -241,8 +241,9 @@ function keepFeature(
   if (!coords) return null;
   const [lon, lat] = coords;
   const props = f.properties ?? {};
-  const name = `${props.name ?? ""} ${props.osm_value ?? ""}`;
-  if (/\b(trail|greenway|bus_stop|platform)\b/i.test(name)) return null;
+  // A street can be named "Trail"; footpaths show in the OSM type instead.
+  if (/\bgreenway\b/i.test(props.name ?? "")) return null;
+  if (/^(path|footway|cycleway|track|bus_stop|platform)$/i.test(props.osm_value ?? "")) return null;
   if (props.countrycode && props.countrycode !== "US") return null;
   const dLat = (lat - bias.lat) * 111;
   const dLon = (lon - bias.lon) * 111 * Math.cos((bias.lat * Math.PI) / 180);
