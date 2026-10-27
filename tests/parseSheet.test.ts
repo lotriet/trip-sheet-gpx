@@ -114,3 +114,15 @@ test("ZIP codes and county tags are not part of a street's name", () => {
 test("a map's misspelled Elementry still matches an ES stop", () => {
   assert.deepEqual(schoolSig("White Oak Elementry"), schoolSig("WHITE OAK ES"));
 });
+
+test("numbered directions read past the ninth", () => {
+  const sheet = parseSheet(`05:42 AM – 1 ALSTON RIDGE MS (start)
+1. Proceed On ALSTON RIDGE MS
+9. Right Turn Onto ROUNDABOUT
+10. Right Turn Onto TOWN HALL DR
+12. Left Turn Onto CHURCH ST 27560
+
+05:58 AM – 1133 BATCHELOR RD`);
+  assert.deepEqual(sheet.stops[0].maneuvers.map((m) => m.street), ["ALSTON RIDGE MS", "ROUNDABOUT", "TOWN HALL DR", "CHURCH ST"]);
+  assert.equal(sheet.stops[1].description, "1133 BATCHELOR RD");
+});
