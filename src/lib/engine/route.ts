@@ -827,10 +827,10 @@ async function routeFrom(
   };
 
   /** Nodes of a street, nearest a point. */
-  const nearestOn = (key: string, point: LonLat, also?: string | null): GraphNode | null => {
+  const nearestOn = (key: string, point: LonLat, also?: string | null, not?: string): GraphNode | null => {
     let best: { n: GraphNode; d: number } | null = null;
     for (const n of graph.nodes.values()) {
-      if (!nodeHas(n, key) || (also && !nodeHas(n, also))) continue;
+      if (!nodeHas(n, key) || (also && !nodeHas(n, also)) || n.id === not) continue;
       const d = haversine(n.coord, point);
       if (!best || d < best.d) best = { n, d };
     }
@@ -844,8 +844,11 @@ async function routeFrom(
    * router, with a via point on the street we're on so it keeps to it.
    */
   const jumpTo = async (toKey: string, label: string, stopIndex: number, maneuverIndex: number): Promise<boolean> => {
-    const target = (currentKey ? nearestOn(toKey, node.coord, currentKey) : null) ?? nearestOn(toKey, node.coord);
-    if (!target || target.id === node.id) return false;
+    // Where the map has a gap, the corner can be marked with both streets
+    // while no road leaves it onto the next one; head for that street's next
+    // point instead of giving up where the bus already is.
+    const target = (currentKey ? nearestOn(toKey, node.coord, currentKey, node.id) : null) ?? nearestOn(toKey, node.coord, null, node.id);
+    if (!target) return false;
     const from = node.coord;
     const to = target.coord;
     // A highway leg ("Proceed Onto I - 40") can run well past 8 km. The road
