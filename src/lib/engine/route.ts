@@ -848,7 +848,12 @@ async function routeFrom(
     if (!target || target.id === node.id) return false;
     const from = node.coord;
     const to = target.coord;
-    if (haversine(from, to) > 8000) return false;
+    // A highway leg ("Proceed Onto I - 40") can run well past 8 km. The road
+    // router may cover it; a straight-line guess may not.
+    // Without the router this pass draws a placeholder; its "Couldn't connect"
+    // note sends the route through the router pass, which must find roads.
+    const far = haversine(from, to) > 8000;
+    if (haversine(from, to) > 30000) return false;
     let path: LonLat[] | null = null;
     if (router) {
       const viaNode = currentKey && currentKey !== toKey ? nearestOn(currentKey, to) : null;
@@ -866,6 +871,7 @@ async function routeFrom(
         (via != null && minDistToLine(via, path).d > 80)
       )) path = null;
     }
+    if (far && router && !path) return false;
     const line = path ?? [from, to];
     appendLine(coords, line, 0.4);
     node = target;
