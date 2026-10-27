@@ -81,6 +81,26 @@ Left Turn Onto BIRCH LN
   assert.ok(haversine(result.coords[result.turnMarks[0].trackIndex], [-78.7, 35.8]) < 5);
 });
 
+test("entering and going around a roundabout, then its exit, follow the sheet", async () => {
+  // The wording on a real sheet: enter with a right, go around with a left,
+  // then the street to leave on. None of these names a road called ROUNDABOUT.
+  const sheet = parseSheet(`07:00 AM MAPLE AVE & ELM ST
+Proceed On MAPLE AVE
+Right Turn Onto ROUNDABOUT
+Left Turn On ROUNDABOUT
+Left Turn Onto BIRCH LN
+07:06 AM BIRCH LN & MAPLE AVE ROUNDABOUT`);
+  const result = await routeSheet(sheet, { lines, places: [] });
+  assert.equal(result.ok, true, result.ok ? "" : result.error);
+  if (!result.ok) return;
+  const messages = result.warnings.map((w) => w.message).join("\n");
+  assert.doesNotMatch(messages, /ROUNDABOUT|angle|almost straight|approximate/);
+  const exit = result.turnMarks.find((m) => m.street === "BIRCH LN");
+  assert.ok(exit, "the exit is marked where the bus joins Birch Ln");
+  assert.equal(exit.kind, "left");
+  assert.ok(haversine(result.coords[exit.trackIndex], [-78.7, 35.8]) < 5);
+});
+
 test("a saved run's GPX gives back its turn pins for the map", async () => {
   const { turnPinsFromGpx } = await import("../src/lib/dayPlan");
   const result = await routeSheet(sheet, { lines, places: [] });

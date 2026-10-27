@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { buildDayGpx, filePlace, fileTime, runFileName } from "../src/lib/dayPlan";
 import { zipStore } from "../src/lib/zipStore";
-import { bboxFromPoints, tilesInBbox } from "../src/lib/mapfetch";
+import { bboxFromPoints, tilesForPoints, tilesInBbox } from "../src/lib/mapfetch";
 
 test("names a run file the way OsmAnd sorts tracks", () => {
   assert.equal(fileTime("2:38 PM"), "0238PM");
@@ -94,4 +94,28 @@ test("caps the number of map tiles", () => {
   const tiles = tilesInBbox({ minLon: -79.2, minLat: 35.4, maxLon: -78.2, maxLat: 36.2 }, 14, 48);
   assert.ok(tiles.length <= 48);
   assert.ok(tiles.length > 0);
+});
+
+test("a deadhead across town loads both ends of the drive", () => {
+  // Morrisville stops, the Cary start, and a school 16 km away in Raleigh.
+  const points = [
+    { lon: -78.8308, lat: 35.8271 },
+    { lon: -78.8534, lat: 35.8622 },
+    { lon: -78.849, lat: 35.8562 },
+    { lon: -78.8536, lat: 35.8352 },
+    { lon: -78.8617, lat: 35.8225 },
+    { lon: -78.8704, lat: 35.817 },
+    { lon: -78.9036, lat: 35.8539 },
+    { lon: -78.7298, lat: 35.8116 },
+    { lon: -78.6855, lat: 35.8122 },
+  ];
+  const tiles = tilesForPoints(points);
+  const has = (lon: number, lat: number) => {
+    const [t] = tilesInBbox({ minLon: lon, maxLon: lon, minLat: lat, maxLat: lat });
+    return tiles.some((u) => u.x === t.x && u.y === t.y);
+  };
+  for (const p of points) assert.ok(has(p.lon, p.lat), `${p.lon},${p.lat} is on the map`);
+  // A point between the stops, inside the box, is not trimmed off either.
+  assert.ok(has(-78.79, 35.84));
+  assert.ok(tiles.length <= 200);
 });
