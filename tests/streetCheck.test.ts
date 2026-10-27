@@ -33,3 +33,10 @@ test("writes suggestions the way the sheet prints them", () => {
   assert.equal(sheetStyle("Cedar Run Drive"), "CEDAR RUN DR");
   assert.equal(sheetStyle("Oak Street"), "OAK ST");
 });
+
+test("ROUNDABOUT, RAMP and EXIT need no street on the map", () => {
+  const index = buildStreetIndex([], []);
+  assert.equal(checkStreet(index, "ROUNDABOUT"), "found");
+  assert.equal(checkStreet(index, "RAMP"), "found");
+  assert.equal(checkStreet(index, "EXIT 287"), "found");
+});

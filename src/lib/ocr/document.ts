@@ -45,7 +45,60 @@ function cleanContent(line: string): string {
     .trim();
 }
 
+/**
+ * A stop's own line: two streets, an end-of-street mark, a school or a
+ * deadhead, or the load and stop ID columns. Never a wrapped street name.
+ */
+export function looksLikeStopLine(line: string): boolean {
+  return (
+    /\s(?:&|AND)\s|@/i.test(line) ||
+    /^\W*(?:school\s*:|deadhead\b)/i.test(line) ||
+    /\s\d{1,3}\s+\d{1,3}\s+[0-9@][0-9A-Za-z]{2}\.[0-9A-Za-z]{3}\W*$/.test(line)
+  );
+}
+
+/**
+ * A clipped page edge turns the leading 0 of "06:18 AM" into 1, ")" or
+ * nothing. An AM/PM hour is never 13-19, so "16:18 AM" is 06:18 AM.
+ */
+export function repairStopTime(line: string): string {
+  const match = line.match(/^\W*(\d{1,2})\s*:\s*(\d{2})\s*([AP])\s*M\b\s*/i);
+  if (!match) return line;
+  let hour = Number(match[1]);
+  if (hour >= 13 && hour <= 19) hour -= 10;
+  if (hour < 1 || hour > 12) return line;
+  const rest = line.slice(match[0].length).replace(/^[~_=\-—–]+\s*/, "");
+  return `${String(hour).padStart(2, "0")}:${match[2]} ${match[3].toUpperCase()}M ${rest}`.trim();
+}
+
+type OcrPiece = { text: string; left: number; top: number; height: number };
+
+/**
+ * Pieces of text back into the printed rows: a stop's time and its
+ * description are read as separate pieces, and on a slightly tilted page the
+ * description can sit a hair higher than its time. Pieces whose middles line
+ * up form one row, read left to right.
+ */
+export function readingRows(pieces: OcrPiece[]): string[] {
+  const sorted = pieces
+    .filter((p) => p.text.trim())
+    .map((p) => ({ ...p, middle: p.top + p.height / 2 }))
+    .sort((a, b) => a.middle - b.middle);
+  const rows: (typeof sorted)[] = [];
+  for (const piece of sorted) {
+    const row = rows.at(-1);
+    const anchor = row?.[0];
+    if (row && anchor && Math.abs(piece.middle - anchor.middle) < Math.min(piece.height, anchor.height) * 0.6) {
+      row.push(piece);
+    } else {
+      rows.push([piece]);
+    }
+  }
+  return rows.map((row) => row.sort((a, b) => a.left - b.left).map((p) => p.text.trim()).join(" "));
+}
+
 function canContinue(line: string): boolean {
+  if (looksLikeStopLine(line)) return false;
   const letters = line.replace(/[^A-Za-z]/g, "");
   if (letters.length < 2) return false;
   const upper = letters.replace(/[^A-Z]/g, "").length;
@@ -68,7 +121,7 @@ export function normalizeSheetOcr(headerRaw: string, bodyRaw: string): string {
   let started = false;
   let previousWasContent = false;
   for (const raw of bodyRaw.replace(/\r/g, "").split("\n")) {
-    const line = cleanContent(raw);
+    const line = repairStopTime(cleanContent(raw));
     if (!line) continue;
     if (TIME.test(line) || DIRECTION.test(line)) {
       started = true;
@@ -85,6 +138,12 @@ export function normalizeSheetOcr(headerRaw: string, bodyRaw: string): string {
     // A long stop or street name sometimes wraps onto a second printed line.
     if (started && previousWasContent && canContinue(line)) {
       result[result.length - 1] += ` ${line}`;
+      continue;
+    }
+    // A stop line whose time was lost keeps its place as a stop.
+    if (started && looksLikeStopLine(line) && /[A-Za-z]{3,}/.test(line)) {
+      result.push(line);
+      previousWasContent = true;
       continue;
     }
     previousWasContent = false;

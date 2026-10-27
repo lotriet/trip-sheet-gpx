@@ -215,6 +215,14 @@ export function parseSheet(raw: string): Sheet {
       continue;
     }
 
+    // A stop line whose time was lost on the scan still starts a stop; the
+    // driver adds the time. Two streets never appear in one direction.
+    if (current && current.maneuvers.length > 0 && /\s&\s|@/.test(line) && /[A-Za-z]{3,}/.test(line)) {
+      current = emptyStop("", line);
+      stops.push(current);
+      continue;
+    }
+
     const loads = line.match(/^(\d+)\s+(\d+)\s+(\d{3}\.\d{3})$/);
     if (loads && current && current.stopId == null) {
       current.stopLoad = Number(loads[1]);
