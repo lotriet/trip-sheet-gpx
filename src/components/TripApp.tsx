@@ -1420,7 +1420,9 @@ export function TripApp() {
         try {
           const corridor = await loadCorridor(a, b, setStatus);
           const driven = driveBetween(corridor.lines, a, b);
-          deadheads.push(driven ? { coords: driven.coords, routed: true } : { coords: [a, b], routed: false });
+          // A gap in the downloaded map can split the corridor; the road router has the whole map.
+          const routed = driven?.coords ?? (await osrmRouter([a, b]).catch(() => null));
+          deadheads.push(routed ? { coords: routed, routed: true } : { coords: [a, b], routed: false });
         } catch {
           deadheads.push({ coords: [a, b], routed: false });
         }
