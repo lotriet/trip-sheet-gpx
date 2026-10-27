@@ -112,9 +112,9 @@ const STREET_WORD =
 export function looksLikePlace(raw: string): boolean {
   // "MAPLE DRIVE MS" is the middle school on Maple Drive; "OAK SCHOOL RD" is a road.
   const words = raw.toLowerCase().replace(/\([^)]*\)/g, " ").replace(/[^a-z0-9\s]/g, " ").trim().split(/\s+/).filter((w) => !/^\d+$/.test(w));
-  if (/^(hs|es|ms|elem|elementary|school|highschool|middleschool)$/.test(words.at(-1) ?? "")) return true;
+  if (/^(hs|es|ms|elem|elementary|elementry|school|highschool|middleschool)$/.test(words.at(-1) ?? "")) return true;
   if (STREET_WORD.test(raw)) return false;
-  return /\b(hs|es|ms|elem|high\s*school|elementary|middle\s*school|school)\b/i.test(raw);
+  return /\b(hs|es|ms|elem|high\s*school|elementary|elementry|middle\s*school|school)\b/i.test(raw);
 }
 
 export function schoolSig(name: string): { tokens: string; level: string } {
@@ -128,10 +128,10 @@ export function schoolSig(name: string): { tokens: string; level: string } {
     .trim();
   let level = "";
   if (/\b(high\s+school|highschool|hs)\b/.test(s)) level = "high";
-  else if (/\b(elementary|elem|es)\b/.test(s)) level = "elem";
+  else if (/\b(elementary|elementry|elem|es)\b/.test(s)) level = "elem";
   else if (/\b(middle|ms)\b/.test(s)) level = "mid";
   s = s.replace(
-    /\b(high\s+school|elementary\s+school|middle\s+school|highschool|middleschool|school|high|elementary|elem|middle|hs|es|ms)\b/g,
+    /\b(high\s+school|elementary\s+school|middle\s+school|highschool|middleschool|school|high|elementary|elementry|elem|middle|hs|es|ms)\b/g,
     " ",
   );
   const tokens = s
