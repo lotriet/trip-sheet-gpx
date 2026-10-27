@@ -75,7 +75,9 @@ export async function decodeTiles(tiles: TileBuffer[]): Promise<{ lines: RawLine
         const cls = str(p.class);
         if (!DRIVE.has(cls)) continue;
         const name = str(p.name).trim();
-        if (/\b(trail|greenway|sidewalk|footway|cycleway)\b/i.test(name)) continue;
+        // Footpaths are not in DRIVE; a drivable road named "Trail" is a street
+        // ("Whisper Rock Trail"), so only path-like names are skipped here.
+        if (/\b(greenway|sidewalk|footway|cycleway)\b/i.test(name)) continue;
         const keys: string[] = [];
         if (name) {
           keys.push(canonicalKey(name));
