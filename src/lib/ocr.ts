@@ -9,7 +9,7 @@
  */
 
 import { crop, preparePage, prepareWholePhoto, resize, rgbaToGray, rotate, rotationCandidates, type Gray, type Prepared } from "./ocr/prep";
-import { mergeLoadColumn, normalizeSheetOcr } from "./ocr/document";
+import { mergeLoadColumn, normalizeSheetOcr, readingRows } from "./ocr/document";
 import { judgeSheetText, RETAKE_MESSAGE } from "./ocr/quality";
 import type { ImageLike, PSM as PageSegmentationMode } from "tesseract.js";
 
@@ -67,9 +67,9 @@ export async function readSheetPhotos(
         const lines = await recognizeNatively(file);
         if (!lines?.length) throw new PhotoError(RETAKE_MESSAGE);
         const ordered = lines.slice().sort((a, b) => a.top - b.top || a.left - b.left);
-        const header = ordered.filter((line) => line.top < 0.18).map((line) => line.text).join("\n");
-        const body = ordered.filter((line) => line.left < 0.73).map((line) => line.text).join("\n");
-        const column = ordered.filter((line) => line.left >= 0.73 && line.top >= 0.18).map((line) => line.text).join("\n");
+        const header = readingRows(lines.filter((line) => line.top < 0.18)).join("\n");
+        const body = readingRows(lines.filter((line) => line.left < 0.73)).join("\n");
+        const column = readingRows(lines.filter((line) => line.left >= 0.73 && line.top >= 0.18)).join("\n");
         const loads = mergeLoadColumn(normalizeSheetOcr(header, body), column);
         const text = loads.text;
         if (!judgeSheetText(text).ok) throw new PhotoError(RETAKE_MESSAGE);

@@ -4,7 +4,7 @@
  * ("MAPLEW OOD MILL RD" -> "MAPLEWOOD MILL RD"). Pure, so it can be tested.
  */
 
-import { canonicalKey, expandPlaceQuery, looksLikePlace, withoutDirection } from "./engine/names";
+import { canonicalKey, expandPlaceQuery, isPassThrough, looksLikePlace, withoutDirection } from "./engine/names";
 import { classifyLocation } from "./engine/parseSheet";
 import { matchPlace } from "./engine/route";
 import type { RawLine, RawPlace } from "./engine/types";
@@ -64,6 +64,8 @@ export function buildStreetIndex(lines: RawLine[], places: RawPlace[] = []): Str
 
 export function checkStreet(index: StreetIndex, raw: string): StreetStatus {
   if (!raw.trim()) return "empty";
+  // ROUNDABOUT, RAMP and EXIT 287 name no street; the bus drives through them.
+  if (isPassThrough(raw)) return "found";
   // School campuses are matched by the route builder in other ways.
   if (looksLikePlace(raw)) return "place";
   const key = canonicalKey(raw);
