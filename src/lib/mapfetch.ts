@@ -33,6 +33,7 @@ async function photon(
   bias: { lat: number; lon: number },
   filter?: { tag?: string; layer?: string },
 ): Promise<PhotonFeature[]> {
+  if (photonDown) return nominatim(query, filter);
   const url = new URL("https://photon.komoot.io/api/");
   url.searchParams.set("q", query);
   if (filter?.tag) url.searchParams.set("osm_tag", filter.tag);
@@ -48,21 +49,155 @@ async function photon(
   // The public geocoder turns away bursts (and then sends no CORS header, so
   // the browser only sees a failed fetch) and sometimes never answers. Space
   // the lookups out, give up on one after a few seconds, and try once more.
-  let lastError: unknown = null;
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
       const features = await queued(() => fetchJson<{ features?: PhotonFeature[] }>(key, 8000));
       const out = features.features ?? [];
       photonCache.set(key, out);
       return out;
-    } catch (err) {
-      lastError = err;
+    } catch {
       await sleep(1200 * (attempt + 1));
     }
   }
-  throw lastError instanceof Error ? lastError : new Error("The geocoder did not answer.");
+  // Photon can refuse a whole network for hours; ask Nominatim from here on.
+  photonDown = true;
+  return nominatim(query, filter);
 }
 
+type NominatimPlace = {
+  lat?: string;
+  lon?: string;
+  name?: string;
+  category?: string;
+  type?: string;
+  boundingbox?: [string, string, string, string];
+  address?: { country_code?: string };
+};
+
+/**
+ * OpenStreetMap's own geocoder, used when Photon will not answer. It allows
+ * one request a second and has no street or school filter, so the answers are
+ * filtered here and returned in Photon's shape.
+ */
+async function nominatim(query: string, filter?: { tag?: string; layer?: string }): Promise<PhotonFeature[]> {
+  const url = new URL("https://nominatim.openstreetmap.org/search");
+  url.searchParams.set("q", query);
+  url.searchParams.set("format", "jsonv2");
+  url.searchParams.set("addressdetails", "1");
+  url.searchParams.set("viewbox", `${WAKE_BBOX.minLon},${WAKE_BBOX.maxLat},${WAKE_BBOX.maxLon},${WAKE_BBOX.minLat}`);
+  url.searchParams.set("bounded", "1");
+  url.searchParams.set("limit", "10");
+  const key = url.toString();
+  let places = nominatimCache.get(key);
+  if (!places) {
+    places = await queued(() => fetchJson<NominatimPlace[]>(key, 10000), NOMINATIM_GAP_MS);
+    nominatimCache.set(key, places);
+  }
+  const [tagKey, tagValue] = filter?.tag?.split(":") ?? [];
+  return places
+    .filter((p) => !tagKey || (p.category === tagKey && p.type === tagValue))
+    .filter((p) => filter?.layer !== "street" || p.category === "highway")
+    .map((p) => {
+      const [minLat, maxLat, minLon, maxLon] = (p.boundingbox ?? []).map(Number);
+      return {
+        geometry: { coordinates: [Number(p.lon), Number(p.lat)] as [number, number] },
+        properties: {
+          name: p.name,
+          countrycode: p.address?.country_code?.toUpperCase(),
+          osm_key: p.category,
+          osm_value: p.type,
+          extent: p.boundingbox ? ([minLon, maxLat, maxLon, minLat] as [number, number, number, number]) : undefined,
+        },
+      };
+    })
+    .slice(0, 5);
+}
+
+/** Set at build time from .env.local or the repo secrets. Without keys the free geocoders are used. */
+const MAPBOX_TOKEN = process.env.NEXT_PUBLIC_MAPBOX_TOKEN ?? "";
+
+type MapboxFeature = {
+  geometry?: { coordinates?: [number, number] };
+  properties?: {
+    name?: string;
+    feature_type?: string;
+    bbox?: [number, number, number, number];
+    context?: { country?: { country_code?: string } };
+  };
+};
+
+/** Mapbox's street and address geocoder, answered in Photon's shape. */
+async function mapbox(query: string, bias: { lat: number; lon: number }): Promise<PhotonFeature[]> {
+  const url = new URL("https://api.mapbox.com/search/geocode/v6/forward");
+  url.searchParams.set("q", query);
+  url.searchParams.set("country", "us");
+  url.searchParams.set("types", "street,address");
+  url.searchParams.set("bbox", `${WAKE_BBOX.minLon},${WAKE_BBOX.minLat},${WAKE_BBOX.maxLon},${WAKE_BBOX.maxLat}`);
+  url.searchParams.set("proximity", `${bias.lon},${bias.lat}`);
+  url.searchParams.set("limit", "5");
+  const key = url.toString();
+  url.searchParams.set("access_token", MAPBOX_TOKEN);
+  let features = mapboxCache.get(key);
+  if (!features) {
+    features = (await fetchJson<{ features?: MapboxFeature[] }>(url.toString(), 8000)).features ?? [];
+    mapboxCache.set(key, features);
+  }
+  return features.map((f) => {
+    const box = f.properties?.bbox;
+    return {
+      geometry: f.geometry,
+      properties: {
+        name: f.properties?.name,
+        countrycode: f.properties?.context?.country?.country_code?.toUpperCase(),
+        osm_value: f.properties?.feature_type,
+        extent: box ? ([box[0], box[3], box[2], box[1]] as [number, number, number, number]) : undefined,
+      },
+    };
+  });
+}
+
+const mapboxCache = new Map<string, MapboxFeature[]>();
+
+const GEOAPIFY_KEY = process.env.NEXT_PUBLIC_GEOAPIFY_KEY ?? "";
+
+type GeoapifyFeature = {
+  geometry?: { coordinates?: [number, number] };
+  bbox?: [number, number, number, number];
+  properties?: { name?: string; street?: string; country_code?: string; result_type?: string };
+};
+
+/** Geoapify, for schools and as a second street geocoder. */
+async function geoapify(query: string, bias: { lat: number; lon: number }, type: "amenity" | "street"): Promise<PhotonFeature[]> {
+  const url = new URL("https://api.geoapify.com/v1/geocode/search");
+  url.searchParams.set("text", query);
+  url.searchParams.set("type", type);
+  url.searchParams.set("filter", `rect:${WAKE_BBOX.minLon},${WAKE_BBOX.minLat},${WAKE_BBOX.maxLon},${WAKE_BBOX.maxLat}`);
+  url.searchParams.set("bias", `proximity:${bias.lon},${bias.lat}`);
+  url.searchParams.set("format", "geojson");
+  url.searchParams.set("limit", "5");
+  const key = url.toString();
+  url.searchParams.set("apiKey", GEOAPIFY_KEY);
+  let features = geoapifyCache.get(key);
+  if (!features) {
+    features = (await fetchJson<{ features?: GeoapifyFeature[] }>(url.toString(), 8000)).features ?? [];
+    geoapifyCache.set(key, features);
+  }
+  return features.map((f) => ({
+    geometry: f.geometry,
+    properties: {
+      name: f.properties?.name ?? f.properties?.street,
+      countrycode: f.properties?.country_code?.toUpperCase(),
+      osm_value: f.properties?.result_type,
+      extent: f.bbox ? ([f.bbox[0], f.bbox[3], f.bbox[2], f.bbox[1]] as [number, number, number, number]) : undefined,
+    },
+  }));
+}
+
+const geoapifyCache = new Map<string, GeoapifyFeature[]>();
+
+let photonDown = false;
+const nominatimCache = new Map<string, NominatimPlace[]>();
+const NOMINATIM_GAP_MS = 1100;
 const photonCache = new Map<string, PhotonFeature[]>();
 let lane: Promise<unknown> = Promise.resolve();
 let lastCall = 0;
@@ -72,10 +207,10 @@ function sleep(ms: number) {
   return new Promise((r) => setTimeout(r, ms));
 }
 
-/** One geocoder request at a time, at most one every GAP_MS. */
-function queued<T>(job: () => Promise<T>): Promise<T> {
+/** One geocoder request at a time, at most one every [gap] ms. */
+function queued<T>(job: () => Promise<T>, gap = GAP_MS): Promise<T> {
   const run = lane.then(async () => {
-    const wait = lastCall + GAP_MS - Date.now();
+    const wait = lastCall + gap - Date.now();
     if (wait > 0) await sleep(wait);
     lastCall = Date.now();
     return job();
@@ -88,7 +223,8 @@ async function fetchJson<T>(url: string, timeoutMs: number): Promise<T> {
   const ctl = new AbortController();
   const timer = setTimeout(() => ctl.abort(), timeoutMs);
   try {
-    const res = await fetch(url, { signal: ctl.signal });
+    const headers: Record<string, string> = typeof window === "undefined" ? { "User-Agent": "trip-sheet-gpx" } : {};
+    const res = await fetch(url, { signal: ctl.signal, headers });
     if (!res.ok) throw new Error(`Geocoder responded ${res.status}`);
     return (await res.json()) as T;
   } finally {
@@ -269,7 +405,21 @@ function sheetQueries(sheet: Sheet): string[] {
  * the run entirely.
  */
 async function geocode(query: string, bias: { lat: number; lon: number }): Promise<PhotonFeature[]> {
-  const first = /\bschool\b/i.test(query)
+  const school = /\bschool\b/i.test(query);
+  // Keyed geocoders first: they answer every time. Mapbox has no schools.
+  const keyed = [
+    ...(MAPBOX_TOKEN && !school ? [() => mapbox(query, bias)] : []),
+    ...(GEOAPIFY_KEY ? [() => geoapify(query, bias, school ? "amenity" : "street")] : []),
+  ];
+  for (const ask of keyed) {
+    try {
+      const found = await ask();
+      if (found.some((f) => keepFeature(f, bias))) return found;
+    } catch {
+      /* try the next geocoder */
+    }
+  }
+  const first = school
     ? await photon(query, bias, { tag: "amenity:school" })
     : await photon(query, bias, { layer: "street" });
   if (first.some((f) => keepFeature(f, bias))) return first;

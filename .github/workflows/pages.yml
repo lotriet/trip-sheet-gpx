@@ -30,6 +30,9 @@ jobs:
       - run: npm test
       - run: npm run lint
       - run: npm run build
+        env:
+          NEXT_PUBLIC_MAPBOX_TOKEN: ${{ secrets.MAPBOX_TOKEN }}
+          NEXT_PUBLIC_GEOAPIFY_KEY: ${{ secrets.GEOAPIFY_KEY }}
       - uses: actions/upload-pages-artifact@v3
         with:
           path: out
