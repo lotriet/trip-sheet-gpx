@@ -1,5 +1,5 @@
 import { decodeTiles, type TileBuffer } from "./engine/tiles";
-import { expandPlaceQuery, looksLikePlace, schoolSig, titleCaseStreet } from "./engine/names";
+import { expandPlaceQuery, isPassThrough, looksLikePlace, schoolSig, titleCaseStreet } from "./engine/names";
 import { matchPlace } from "./engine/route";
 import { KNOWN_SCHOOLS, WAKE_BBOX } from "./engine/schools";
 import { classifyLocation } from "./engine/parseSheet";
@@ -126,18 +126,24 @@ function knownSchool(raw: string): RawPlace | null {
   return looksLikePlace(raw) ? matchPlace(raw, knownPlaces) : null;
 }
 
-export function bboxFromPoints(points: { lon: number; lat: number; extent?: Bbox }[]): Bbox | null {
-  const kept: { lon: number; lat: number; extent?: Bbox }[] = [];
-  if (!points.length) return null;
-  const lats = points.map((p) => p.lat).sort((a, b) => a - b);
-  const lons = points.map((p) => p.lon).sort((a, b) => a - b);
-  const midLat = lats[Math.floor(lats.length / 2)];
-  const midLon = lons[Math.floor(lons.length / 2)];
-  for (const p of points) {
-    const dLat = (p.lat - midLat) * 111;
-    const dLon = (p.lon - midLon) * 111 * Math.cos((midLat * Math.PI) / 180);
-    if (Math.hypot(dLat, dLon) <= 12) kept.push(p);
-  }
+type MapPoint = { lon: number; lat: number; extent?: Bbox };
+type Tile = { z: number; x: number; y: number };
+
+function kmBetween(a: { lon: number; lat: number }, b: { lon: number; lat: number }): number {
+  const dLat = (a.lat - b.lat) * 111;
+  const dLon = (a.lon - b.lon) * 111 * Math.cos((a.lat * Math.PI) / 180);
+  return Math.hypot(dLat, dLon);
+}
+
+/** Points within [keepKm] of the sheet's middle; a geocoder hit across the state is dropped. */
+function nearMiddle(points: MapPoint[], keepKm: number): MapPoint[] {
+  if (!points.length) return [];
+  const mid = middle(points);
+  return points.filter((p) => kmBetween(p, mid) <= keepKm);
+}
+
+export function bboxFromPoints(points: MapPoint[], keepKm = 12): Bbox | null {
+  const kept = nearMiddle(points, keepKm);
   if (!kept.length) return null;
   let minLon = Infinity;
   let minLat = Infinity;
@@ -178,10 +184,67 @@ export function tilesInBbox(box: Bbox, z = 14, cap = 48): { z: number; x: number
   return out.slice(0, cap);
 }
 
+/**
+ * Map tiles for a run. A run that fits under [boxCap] gets its whole box, with
+ * no edge trimmed. A wider one, such as a deadhead across town to a school,
+ * gets the box around most of its streets plus the area around each street
+ * or school outside it and a band along the straight lines joining them.
+ */
+export function tilesForPoints(points: MapPoint[], z = 14, boxCap = 120, cap = 200): Tile[] {
+  const box = bboxFromPoints(points, 30);
+  if (!box) return [];
+  const whole = tilesInBbox(box, z, Infinity);
+  if (whole.length <= boxCap) return whole;
+  const out = new Map<string, Tile>();
+  const add = (t: Tile) => out.set(`${t.x}/${t.y}`, t);
+  const core = bboxFromPoints(points, 12);
+  if (core) for (const t of tilesInBbox(core, z, boxCap)) add(t);
+  const kept: MapPoint[] = [];
+  for (const p of nearMiddle(points, 30)) {
+    if (!kept.some((k) => kmBetween(k, p) < 0.5)) kept.push(p);
+  }
+  for (const p of kept) {
+    const b = p.extent ?? { minLon: p.lon, maxLon: p.lon, minLat: p.lat, maxLat: p.lat };
+    const d = 0.012;
+    for (const t of tilesInBbox({ minLon: b.minLon - d, maxLon: b.maxLon + d, minLat: b.minLat - d, maxLat: b.maxLat + d }, z, 16)) add(t);
+  }
+  for (const [a, b] of joiningLines(kept)) {
+    const steps = Math.max(1, Math.ceil(kmBetween(a, b)));
+    for (let i = 0; i <= steps; i++) {
+      const x = lonTile(a.lon + ((b.lon - a.lon) * i) / steps, z);
+      const y = latTile(a.lat + ((b.lat - a.lat) * i) / steps, z);
+      for (let dx = -1; dx <= 1; dx++) for (let dy = -1; dy <= 1; dy++) add({ z, x: x + dx, y: y + dy });
+    }
+  }
+  return [...out.values()].slice(0, cap);
+}
+
+/** The shortest set of straight lines that joins every point (a spanning tree). */
+function joiningLines(points: MapPoint[]): [MapPoint, MapPoint][] {
+  if (points.length < 2) return [];
+  const joined = [points[0]];
+  const rest = points.slice(1);
+  const lines: [MapPoint, MapPoint][] = [];
+  while (rest.length) {
+    let best = { km: Infinity, from: joined[0], at: 0 };
+    rest.forEach((p, at) => {
+      for (const from of joined) {
+        const km = kmBetween(from, p);
+        if (km < best.km) best = { km, from, at };
+      }
+    });
+    const [next] = rest.splice(best.at, 1);
+    lines.push([best.from, next]);
+    joined.push(next);
+  }
+  return lines;
+}
+
 function sheetQueries(sheet: Sheet): string[] {
   const seen = new Set<string>();
   const out: string[] = [];
   const add = (raw: string) => {
+    if (isPassThrough(raw)) return;
     const q = streetQuery(raw).trim();
     const key = q.toLowerCase();
     if (!q || seen.has(key)) return;
@@ -259,8 +322,8 @@ async function fetchTile(url: string): Promise<Response | null> {
   return null;
 }
 
-async function readTiles(box: Bbox, onStatus?: (s: string) => void): Promise<MapData> {
-  const tiles = tilesInBbox(box);
+async function readTiles(area: Bbox | Tile[], onStatus?: (s: string) => void): Promise<MapData> {
+  const tiles = Array.isArray(area) ? area : tilesInBbox(area);
   onStatus?.(`Reading ${tiles.length} map tiles…`);
   const pattern = await template();
   const buffers: TileBuffer[] = [];
@@ -319,14 +382,16 @@ export async function loadMap(
       /* one missed street should not sink the sheet */
     }
   }
-  const box = bboxFromPoints(points) ?? {
+  const fallback = {
     minLon: bias.lon - 0.08,
     maxLon: bias.lon + 0.08,
     minLat: bias.lat - 0.06,
     maxLat: bias.lat + 0.06,
   };
+  const box = bboxFromPoints(points, 30) ?? fallback;
+  const tiles = tilesForPoints(points);
   onStatus?.("Matching the printed streets…");
-  return withKnownSchools(await readTiles(box, onStatus), box);
+  return withKnownSchools(await readTiles(tiles.length ? tiles : fallback, onStatus), box);
 }
 
 function middle(points: { lon: number; lat: number }[]): { lon: number; lat: number } {

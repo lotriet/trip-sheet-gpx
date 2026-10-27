@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { EXAMPLE_SHEET_TEXT } from "../src/lib/exampleSheet";
+import { canonicalKey, isPassThrough, titleCaseStreet } from "../src/lib/engine/names";
 import { classifyLocation, parseSheet } from "../src/lib/engine/parseSheet";
 
 test("parses the made-up example sheet", () => {
@@ -85,4 +86,27 @@ Seba
   );
   assert.equal(sheet.stops[2].stopLoad, 9);
   assert.equal(sheet.stops[2].runLoad, 16);
+});
+
+test("a stop named after a roundabout is placed on its street", () => {
+  assert.deepEqual(classifyLocation("DENMARK MANOR DR & ROUNDABOUT"), { kind: "street", street: "DENMARK MANOR DR" });
+  assert.deepEqual(classifyLocation("HAMILTON HEDGE PL & AIRPORT BLVD ROUNDABOUT"), {
+    kind: "intersection",
+    a: "HAMILTON HEDGE PL",
+    b: "AIRPORT BLVD",
+  });
+});
+
+test("a house address stop is placed on its street", () => {
+  assert.deepEqual(classifyLocation("Deadhead - 4141 GREEN LEVEL WEST RD - DOORSIDE"), { kind: "street", street: "GREEN LEVEL WEST RD" });
+  assert.deepEqual(classifyLocation("1133 BATCHELOR RD"), { kind: "street", street: "BATCHELOR RD" });
+});
+
+test("ZIP codes and county tags are not part of a street's name", () => {
+  assert.equal(canonicalKey("CHURCH ST 27560"), canonicalKey("CHURCH ST"));
+  assert.equal(canonicalKey("CHURCH ST ,27560"), canonicalKey("CHURCH ST"));
+  assert.equal(canonicalKey("VANDIVER WAY-CHATHAM CO"), canonicalKey("VANDIVER WAY"));
+  assert.equal(titleCaseStreet("WADE AVE 27607"), "Wade Ave");
+  assert.ok(isPassThrough("RAMP") && isPassThrough("EXIT 287") && isPassThrough("ROUNDABOUT"));
+  assert.ok(!isPassThrough("EXIT RD"));
 });

@@ -129,9 +129,15 @@ export function classifyLocation(description: string): StopLocation {
     const street = d.split("@")[0].replace(/\bend of\b.*$/i, "").trim();
     if (street) return { kind: "end", street };
   }
-  const parts = d.split(/\s+&\s+|\s+\band\b\s+/i).map((p) => p.trim()).filter(Boolean);
+  // "AIRPORT BLVD ROUNDABOUT" is that street's roundabout; a bare "ROUNDABOUT" names no street.
+  const parts = d
+    .split(/\s+&\s+|\s+\band\b\s+/i)
+    .map((p) => p.replace(/\s+(?:roundabout|traffic circle)$/i, "").trim())
+    .filter((p) => p && !/^(?:the\s+)?(?:roundabout|traffic\s+circle|rotary)$/i.test(p));
   if (parts.length === 2) return { kind: "intersection", a: parts[0], b: parts[1] };
-  if (d) return { kind: "street", street: d };
+  if (parts.length === 1 && /&|\band\b/i.test(d)) return { kind: "street", street: parts[0] };
+  // "4141 GREEN LEVEL WEST RD": a house on that street; the number is not part of its name.
+  if (d) return { kind: "street", street: d.replace(/^\d+\s+(?=\D)/, "") };
   return { kind: "unknown" };
 }
 

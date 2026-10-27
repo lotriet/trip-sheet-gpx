@@ -51,8 +51,27 @@ export function withoutDirection(key: string): string {
 }
 
 /** Stable street key: "Morgan Street" and "MORGAN ST" both become "morgan st". */
+/**
+ * The sheet tags some names with a ZIP code ("CHURCH ST 27560", "CHURCH ST
+ * ,27560") or a county ("VANDIVER WAY-CHATHAM CO"). Neither is part of the name.
+ */
+export function withoutPlaceTags(raw: string): string {
+  return raw
+    .replace(/\s*-\s*[A-Za-z]+\s+CO(?:UNTY)?\s*$/i, "")
+    .replace(/\s*,?\s*\b\d{5}\s*$/, "")
+    .trim();
+}
+
+/**
+ * A roundabout, ramp or highway exit named only as such on the sheet. The bus
+ * drives through it and the next line names the road it leaves on.
+ */
+export function isPassThrough(street: string): boolean {
+  return /^(?:the\s+)?(?:roundabout|traffic\s+circle|rotary|ramp|exit\s*\d+[a-z]?)$/i.test(street.trim());
+}
+
 export function canonicalKey(raw: string): string {
-  let s = raw
+  let s = withoutPlaceTags(raw)
     .toLowerCase()
     .replace(/&/g, " and ")
     .replace(/[^a-z0-9\s]/g, " ")
@@ -159,7 +178,7 @@ export function titleCaseStreet(raw: string): string {
     const label = p === "i" ? "I" : p === "us" ? "US" : p === "sr" ? "SR" : "NC";
     return `${label} ${n}`;
   }
-  return raw
+  return withoutPlaceTags(raw)
     .toLowerCase()
     .replace(/\b([a-z])/g, (m) => m.toUpperCase())
     .replace(/\bPkwy\b/g, "Pkwy")

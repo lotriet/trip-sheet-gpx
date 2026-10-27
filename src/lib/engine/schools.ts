@@ -47,6 +47,7 @@ export const KNOWN_SCHOOLS: [name: string, lat: number, lon: number][] = [
   ["West Cary Middle School", 35.80265, -78.79445],
   ["Pine Hollow Middle School", 35.90753, -78.73433],
   ["Northwoods Elementary School", 35.79542, -78.79016],
+  ["Martin Middle School", 35.81221, -78.68552],
 ];
 
 /** Wake County, for keeping geocoder answers in the county. */

@@ -11,7 +11,7 @@ import {
   turnAngle,
 } from "./geo";
 import { buildGraph, edgeHas, edgeServes, keysInGraph, nodeHas, type Graph, type GraphEdge, type GraphLine, type GraphNode } from "./graph";
-import { canonicalKey, looksLikePlace, sameSchool, schoolSig, withoutDirection } from "./names";
+import { canonicalKey, isPassThrough, looksLikePlace, sameSchool, schoolSig, withoutDirection } from "./names";
 import { classifyLocation, flattenManeuvers } from "./parseSheet";
 import type {
   LonLat,
@@ -225,7 +225,7 @@ function meetingPairs(sheet: Sheet, available: Set<string>, places: RawPlace[]):
   };
   let prev: string[] = [];
   for (const f of flat) {
-    if (f.maneuver.kind === "proceed" && isRoundabout(f.maneuver.street)) continue;
+    if (isPassThrough(f.maneuver.street)) continue;
     const keys = candidateKeys(f.maneuver.street, available, places);
     addAll(prev, keys);
     prev = keys;
@@ -782,10 +782,6 @@ export type Router = (points: LonLat[]) => Promise<LonLat[] | null>;
 
 const JUMP_NOTE = "Couldn't connect";
 
-/** A roundabout named only as such on the sheet, not a street. */
-export function isRoundabout(street: string): boolean {
-  return /^(?:the\s+)?(?:roundabout|traffic\s+circle|rotary)$/i.test(street.trim());
-}
 
 async function routeFrom(
   graph: Graph,
@@ -910,14 +906,23 @@ async function routeFrom(
     }
   };
 
+  let inRoundabout = false;
   for (let i = 0; i < flat.length; i++) {
     const { stopIndex, maneuverIndex, maneuver } = flat[i];
-    if (maneuver.kind === "proceed" && isRoundabout(maneuver.street)) {
-      // "Proceed Onto ROUNDABOUT": drive through it. The next line names the
-      // street to leave on, so there is no road called ROUNDABOUT to find.
-      legs.push({ stopIndex, maneuverIndex, kind: "proceed", street: maneuver.street, meters: 0 });
+    if (isPassThrough(maneuver.street)) {
+      // "Right Turn Onto ROUNDABOUT", "Left Turn On ROUNDABOUT", "Right Turn
+      // Onto RAMP", "Proceed Onto EXIT 287": drive into or through it. The next
+      // line names the road to leave on, so there is nothing called that to find.
+      legs.push({ stopIndex, maneuverIndex, kind: maneuver.kind as ManeuverKind, street: maneuver.street, meters: 0 });
+      inRoundabout = true;
       continue;
     }
+    // Leaving a roundabout or ramp, the sheet's left or right says which way the
+    // exit goes, not a corner to turn at: drive on to where the street joins.
+    const exitsRoundabout = inRoundabout && (maneuver.kind === "left" || maneuver.kind === "right");
+    const kind = exitsRoundabout ? "proceed" : maneuver.kind;
+    inRoundabout = false;
+    let joinAt = -1;
     const before = polylineMeters(coords);
     // Of several direction variants, the one the bus is nearest to.
     const target = resolveTarget(maneuver.street, available, places, (keys) => {
@@ -935,7 +940,7 @@ async function routeFrom(
       warn("info", stopIndex, maneuverIndex, `Matched “${maneuver.street}” to the nearest street name in the map.`);
     }
 
-    if (maneuver.kind === "turnaround") {
+    if (kind === "turnaround") {
       skipTurnAt = null;
       if (currentKey && currentKey !== target.key && target.how !== "missing") {
         const leg = travel(currentKey, { type: "turn", key: target.key, dir: null });
@@ -989,17 +994,19 @@ async function routeFrom(
         maneuverIndex,
         `Turnaround on ${maneuver.street} was placed ${where}. Move it on the map if the bus turns around somewhere else.`,
       );
-    } else if (maneuver.kind === "proceed") {
+    } else if (kind === "proceed") {
       skipTurnAt = null;
       if (nodeHas(node, target.key)) {
         // Leave heading unset when we are just starting out, so the next turn can try both directions.
         currentKey = target.key;
+        joinAt = coords.length - 1;
       } else if (currentKey && target.how !== "missing") {
         const leg = travel(currentKey, { type: "turn", key: target.key, dir: null });
         if (leg) {
           appendLine(coords, leg.coords, 0.4);
           node = leg.node;
           heading = leg.heading;
+          joinAt = coords.length - 1;
           const turn = chooseTurn(node, heading, target.key, "straight", graph);
           if (turn) {
             appendLine(coords, turn.edge.coords, 0.4);
@@ -1009,6 +1016,7 @@ async function routeFrom(
           }
         } else if (await jumpTo(target.key, maneuver.street, stopIndex, maneuverIndex)) {
           currentKey = target.key;
+          joinAt = coords.length - 1;
         } else {
           warn("warn", stopIndex, maneuverIndex, `Couldn't stay on the sheet from here onto ${maneuver.street}.`);
         }
@@ -1016,8 +1024,18 @@ async function routeFrom(
         currentKey = target.key;
       }
       if (currentKey) hopVias(currentKey);
+      if (exitsRoundabout && joinAt >= 0 && currentKey === target.key) {
+        turnMarks.push({
+          stopIndex,
+          maneuverIndex,
+          kind: maneuver.kind as "left" | "right",
+          street: maneuver.street,
+          trackIndex: joinAt,
+          confirmed: true,
+        });
+      }
     } else {
-      const dir = maneuver.kind;
+      const dir = kind as "left" | "right";
       const sameCorner = skipTurnAt != null && node.id === skipTurnAt;
       let usedClosestConnection = false;
       if (currentKey && currentKey !== target.key && (sameCorner || !canTurn(node, heading, target.key, dir, graph))) {
