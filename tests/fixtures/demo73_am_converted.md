@@ -1,0 +1,226 @@
+Route DEMO73 – Trip Sheet Directions
+
+---
+
+Run 900.207 – BIRCH MS 07 (GL)
+
+05:42 AM – 1 OAK RIDGE MS (start)
+
+1. Proceed On OAK RIDGE MS
+2. Left Turn Onto WINDING ASH TRL
+3. Right Turn Onto GREEN LEVEL CHURCH RD
+4. Left Turn Onto OKELLY CHAPEL RD
+5. Right Turn Onto NC 55 HWY
+6. Left Turn Onto CARPENTER FIRE STATION RD
+7. Proceed Onto MORRISVILLE CARPENTER RD
+8. Left Turn Onto TOWN HALL DR
+9. Right Turn Onto ROUNDABOUT
+10. Right Turn Onto TOWN HALL DR
+11. Right Turn Onto ROBIN ST
+12. Left Turn Onto CHURCH ST 27560
+
+05:58 AM – CHURCH ST ,27560 & ROBIN ST (DOORSIDE)
+
+1. Proceed On CHURCH ST 27560
+
+05:59 AM – CHURCH ST ,27560 & WREN DR (DOORSIDE)
+
+1. Proceed On CHURCH ST 27560
+2. Left Turn Onto KIT CREEK RD
+3. Right Turn Onto FINCH VALLEY LN
+
+06:09 AM – FINCH VALLEY LN & LARK RIDGE LN
+
+1. Right Turn Onto LARK RIDGE LN
+2. Right Turn Onto GRAND HERON BLVD
+
+06:11 AM – GRAND HERON BLVD & SPARROW LN
+
+1. Proceed On GRAND HERON BLVD
+2. Left Turn Onto PLOVER NECK LN
+3. Right Turn Onto SHRIKE BORO LN
+4. Right Turn Onto CHURCH ST 27560
+5. Right Turn Onto WEAVERBIRD FOREST WAY
+6. Right Turn Onto QUAIL FARM RD
+
+06:15 AM – QUAIL FARM RD @ POOL LOT
+
+1. Proceed On QUAIL FARM RD
+2. Left Turn Onto PLOVER FIELDS RD
+3. Right Turn Onto GULL POINT RD
+4. Right Turn On GULL POINT RD
+5. Right Turn Onto ROUNDABOUT
+
+06:18 AM – THRUSH MANOR DR & ROUNDABOUT
+
+1. Proceed On ROUNDABOUT
+2. Right Turn Onto GULL POINT RD
+3. Right Turn Onto CHURCH ST 27560
+4. Right Turn Onto MAGPIE PKWY
+5. Right Turn Onto TOWN HALL DR
+6. Left Turn Onto OSPREY MILL RD
+
+06:22 AM – KESTREL DR & OSPREY MILL RD
+
+1. Proceed On OSPREY MILL RD
+2. Right Turn Onto MAGPIE PKWY
+
+06:23 AM – MAGPIE PKWY AND EGRET WALK CIR – DOORSIDE
+
+1. Proceed On MAGPIE PKWY
+
+06:23 AM – MAGPIE PKWY & TERN DR (DOORSIDE)
+
+1. Proceed On MAGPIE PKWY
+2. Right Turn Onto DAVIS DR
+3. Left Turn Onto PARKLARK VALLEY DR
+4. Left Turn Onto GRAY PEBBLE RD
+
+06:27 AM – GRAY PEBBLE RD & CRANE MILL RD
+
+1. Proceed On GRAY PEBBLE RD
+2. Left Turn Onto MARTEN DR
+
+06:28 AM – MARTEN DR & RIVER FERN DR (DOORSIDE)
+
+1. Proceed On MARTEN DR
+2. Left Turn Onto MAGPIE PKWY
+3. Right Turn Onto BLUEJAY PARK LN
+
+06:30 AM – LONG GATEPOST RD & BLUEJAY PARK LN
+
+1. Proceed On BLUEJAY PARK LN
+2. Left Turn Onto SWALLOW WAY
+3. Right Turn Onto ELMNEST WAY
+4. Right Turn Onto VALE VIEW LN
+5. Right Turn Onto ROUNDABOUT
+6. Right Turn Onto AIRPORT BLVD
+7. Right Turn Onto ROUNDABOUT
+8. Left Turn On ROUNDABOUT
+
+06:33 AM – HAWTHORN HEDGE PL & AIRPORT BLVD ROUNDABOUT
+
+1. Right Turn Onto HAWTHORN HEDGE PL
+2. Left Turn Onto CARDINAL TOWN LN
+
+06:36 AM – CARDINAL TOWN LN & MEADOWLARK WALK LN
+
+1. Proceed On CARDINAL TOWN LN
+2. Right Turn Onto MORRISVILLE CARPENTER RD
+3. Proceed On MORRISVILLE CARPENTER RD
+4. Proceed Onto AVIATION PKWY
+5. Right Turn Onto RAMP
+6. Proceed Onto I - 40
+7. Proceed Onto WADE AVE 27607
+8. Left Turn Onto RIDGE RD
+9. Left Turn Onto BIRCH MS
+10. Turn Around On BIRCH MS
+
+07:00 AM – SCHOOL: BIRCH MS (end)
+
+---
+
+Run 900.208 – PINE PARK MS 01
+
+07:05 AM – DEADHEAD – SCHOOL: BIRCH MS
+
+1. Proceed On BIRCH MS
+2. Right Turn Onto RIDGE RD
+3. Right Turn Onto WADE AVE 27607
+4. Proceed Onto I - 40
+5. Proceed Onto EXIT 287
+6. Left Turn Onto N HARRISON AVE
+7. Right Turn Onto NW CARY PKWY
+8. Right Turn Onto CHAPEL HILL RD
+9. Left Turn Onto MORRISVILLE PKWY
+10. Proceed On MORRISVILLE PKWY
+11. Left Turn Onto NC 55 HWY
+
+07:31 AM – STARLING WAY & NC 55 HWY – DOORSIDE
+
+1. Proceed On NC 55 HWY
+
+07:31 AM – BROOK BOWER DR & NC 55 HWY – DOORSIDE
+
+1. Proceed On NC 55 HWY
+2. Right Turn Onto GREEN LEVEL WEST RD
+3. Right Turn Onto OAKFIELD AVE
+
+07:32 AM – OAKFIELD AVE & LINNET LN 
+(no directions; the next stop is at the same location)
+
+07:32 AM – OAKFIELD AVE & LINNET LN – SIT BEHIND DRIVER
+
+1. Proceed On OAKFIELD AVE
+2. Left Turn Onto WEST KNOLL DR
+3. Right Turn Onto GLENBIRCH RD
+4. Right Turn Onto EDGEWOOD AVE
+5. Left Turn Onto NC 55 HWY
+
+07:37 AM – 9900 NC 55 HWY – DOORSIDE
+
+1. Proceed On NC 55 HWY
+2. Left Turn Onto MORRISVILLE PKWY
+3. Right Turn Onto ROUNDABOUT
+4. Left Turn On ROUNDABOUT
+5. Right Turn Onto MORRISVILLE PKWY
+6. Right Turn Onto ROUNDABOUT
+7. Left Turn On ROUNDABOUT
+8. Right Turn Onto MORRISVILLE PKWY
+9. Right Turn Onto MILLS PARK DR
+10. Right Turn Onto PINE PARK MS
+11. Turn Around On PINE PARK MS
+
+07:45 AM – SCHOOL: PINE PARK MS
+
+---
+
+Run 900.209 – PINE PARK ES 02 ORANGE
+
+08:22 AM – DEADHEAD – SCHOOL: PINE PARK MS
+
+1. Proceed On PINE PARK MS
+2. Right Turn Onto MILLS PARK DR
+3. Right Turn Onto GREEN LEVEL CHURCH RD
+4. Right Turn Onto MAGPIE PKWY
+5. Left Turn Onto FOX CREEK HS
+6. Turn Around On FOX CREEK HS
+
+08:30 AM – FOX CREEK HS (STAFF)
+
+1. Proceed On FOX CREEK HS
+2. Right Turn Onto MAGPIE PKWY
+3. Left Turn Onto GREEN LEVEL CHURCH RD
+4. Right Turn Onto CARY GLEN BLVD
+5. Right Turn Onto FERN KNOLL DR
+6. Right Turn Onto ALDER BRIDGE DR
+
+08:37 AM – ALDER BRIDGE DR & ALDER BRIDGE DR
+
+1. Right Turn On ALDER BRIDGE DR
+2. Left Turn Onto FERN KNOLL DR
+3. Left Turn Onto CARY GLEN BLVD
+4. Left Turn Onto WARBLER WAY
+
+08:40 AM – PIPIT CT & WARBLER WAY
+
+1. Proceed On WARBLER WAY
+2. Right Turn Onto CARY GLEN BLVD
+3. Left Turn Onto COVE VIEW LN
+
+08:41 AM – COVE VIEW LN & WATERFOWL LAKE DR
+
+1. Proceed On COVE VIEW LN
+2. Proceed Onto MILLS PARK DR
+3. Left Turn Onto PINE PARK ES
+4. Turn Around On PINE PARK ES
+
+08:45 AM – SCHOOL: PINE PARK ES
+
+1. Proceed On PINE PARK ES
+2. Right Turn Onto MILLS PARK DR
+3. Right Turn Onto GREEN LEVEL CHURCH RD
+4. Left Turn Onto WINDING ASH TRL
+5. Right Turn Onto OAK RIDGE MS
+
+08:53 AM – 1 OAK RIDGE MS
