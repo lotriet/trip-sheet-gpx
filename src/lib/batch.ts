@@ -392,3 +392,35 @@ export function splitRuns(text: string): string[] {
   // Otherwise a chunk without a run header inherits nothing; the run number, if any, comes from its own header.
   return out.filter((c) => c.trim());
 }
+
+/**
+ * Checks on a typed or converted sheet before it is built: what a careful
+ * reader would catch. Each message names the run and stop to look at.
+ */
+export function sheetProblems(trips: Trip[]): string[] {
+  const out: string[] = [];
+  const place = (description: string) => description.replace(/^deadhead\s*-\s*/i, "").replace(/\s*\((?:start|end)\)\s*$/i, "").trim().toUpperCase();
+  trips.forEach((trip, t) => {
+    const label = `Run ${trip.run || t + 1}`;
+    const stops = trip.sheet.stops;
+    if (!stops.length) out.push(`${label} has no stops.`);
+    stops.forEach((stop, i) => {
+      if (!minutesOf(stop.time)) out.push(`${label}, stop ${i + 1} (${stop.description || "no name"}) has no time.`);
+      if (!stop.description.trim()) out.push(`${label}, stop ${i + 1} at ${stop.time} has no name.`);
+    });
+    // Building sorts stops by time, so look at the order they were printed in.
+    const printed = parseSheet(trip.text).stops;
+    printed.forEach((stop, i) => {
+      const before = i > 0 ? minutesOf(printed[i - 1].time) : null;
+      const at = minutesOf(stop.time);
+      if (before != null && at != null && at < before) out.push(`${label}, stop ${i + 1} at ${stop.time} is earlier than the stop before it.`);
+    });
+    const last = stops.at(-1);
+    if (last && last.maneuvers.length && t === trips.length - 1) out.push(`${label} ends with directions after its last stop.`);
+    const previous = trips[t - 1]?.sheet.stops.at(-1);
+    if (previous && stops[0] && place(previous.description) !== place(stops[0].description)) {
+      out.push(`${label} starts at ${place(stops[0].description)}, but the run before ends at ${place(previous.description)}.`);
+    }
+  });
+  return out;
+}

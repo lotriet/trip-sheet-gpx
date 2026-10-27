@@ -20,7 +20,7 @@ import { isPdf, pdfToPageImages } from "@/lib/pdfPages";
 import { osrmRouter } from "@/lib/osrm";
 import { RETAKE_MESSAGE } from "@/lib/ocr/quality";
 import { loadDay, saveDay, type SavedRun } from "@/lib/storage";
-import { autoGroup, buildTrips, describePage, dropDuplicatePages, gpxFileName, mergeIntoDay, newTripKey, sortStopsByTime, splitRuns, type PageInfo, type PageRead, type Trip } from "@/lib/batch";
+import { autoGroup, buildTrips, describePage, dropDuplicatePages, gpxFileName, mergeIntoDay, newTripKey, sheetProblems, sortStopsByTime, splitRuns, type PageInfo, type PageRead, type Trip } from "@/lib/batch";
 import { canShareFiles, sendNativeGpx, shareOrDownload, type TextFile } from "@/lib/shareFiles";
 import { buildStreetIndex, checkStop, checkStreet, looseName, sheetStyle, suggestFor as suggestNames } from "@/lib/streetCheck";
 
@@ -746,9 +746,27 @@ export function TripApp() {
     input.value = "";
     if (!picked.length) return;
     setError("");
+    // A typed or converted sheet (.md or .txt) is read as text: no photo reader.
+    const textFiles = picked.filter((file) => /\.(?:md|markdown|txt)$/i.test(file.name) || file.type.startsWith("text/"));
+    if (textFiles.length) {
+      const read = await Promise.all(textFiles.map(async (file) => ({ name: file.name, text: await file.text() })));
+      const joined = read.map((r) => r.text).join("\n\n");
+      const pages = read.flatMap((r) => splitRuns(r.text).map((text) => describePage({ photo: -1, name: r.name, text })));
+      const problems = sheetProblems(buildTrips(pages, autoGroup(pages)));
+      const note = problems.length
+        ? `Check ${problems.length === 1 ? "this" : "these"} before building: ${problems.slice(0, 4).join(" ")}${problems.length > 4 ? ` And ${problems.length - 4} more.` : ""}`
+        : "";
+      setText(joined);
+      if (!takeText(read.map((r) => ({ photo: -1, name: r.name, text: r.text })), note)) {
+        applyText(joined);
+        if (note) setError(note);
+      }
+      if (textFiles.length === picked.length) return;
+    }
     const files: File[] = [];
     try {
       for (const file of picked) {
+        if (textFiles.includes(file)) continue;
         if (isPdf(file)) files.push(...(await pdfToPageImages(file, setStatus)));
         else files.push(file);
       }
@@ -1917,8 +1935,8 @@ export function TripApp() {
               <input className="sr-only" type="file" accept="image/*,.heic,.heif" capture="environment" multiple onChange={(e) => void onPhotos(e.currentTarget)} />
             </label>
             <label className="flex h-12 cursor-pointer items-center justify-center rounded-lg bg-white text-sm font-medium ring-1 ring-[#d9d2c3]">
-              Photos or PDF
-              <input className="sr-only" type="file" accept="image/*,.heic,.heif,application/pdf,.pdf" multiple onChange={(e) => void onPhotos(e.currentTarget)} />
+              Photos, PDF or text
+              <input className="sr-only" type="file" accept="image/*,.heic,.heif,application/pdf,.pdf,.md,.markdown,.txt,text/plain,text/markdown" multiple onChange={(e) => void onPhotos(e.currentTarget)} />
             </label>
           </div>}
           <label className="text-sm font-medium">
