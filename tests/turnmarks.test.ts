@@ -108,3 +108,28 @@ test("a saved run's GPX gives back its turn pins for the map", async () => {
   if (!result.ok) return;
   assert.deepEqual(turnPinsFromGpx(result.gpx), [{ lat: 35.8, lon: -78.7, label: "Left on Birch Ln", kind: "left", confirmed: true }]);
 });
+
+test("a highway leg longer than 8 km is driven by the road router, not dropped", async () => {
+  // Two streets 12 km apart with no map road between them, as on I-40.
+  const far = [
+    line("Maple Avenue", ["maple ave"], [[-78.71, 35.8], [-78.705, 35.8], [-78.7, 35.8]]),
+    line("Elm Street", ["elm st"], [[-78.705, 35.795], [-78.705, 35.8], [-78.705, 35.805]]),
+    line("Wade Avenue", ["wade ave"], [[-78.57, 35.8], [-78.565, 35.8], [-78.56, 35.8]]),
+  ];
+  const sheet = parseSheet(`07:00 AM MAPLE AVE & ELM ST
+Proceed On MAPLE AVE
+Proceed Onto WADE AVE
+07:30 AM WADE AVE @ THE END OF THE ROAD`);
+  let asked = 0;
+  // Roads through every point it is given, as a real router would.
+  const router = async (points: [number, number][]) => {
+    asked++;
+    return points;
+  };
+  const result = await routeSheet(sheet, { lines: far, places: [] }, {}, router);
+  assert.equal(result.ok, true, result.ok ? "" : result.error);
+  if (!result.ok) return;
+  assert.ok(asked > 0);
+  assert.doesNotMatch(result.warnings.map((w) => w.message).join("\n"), /Couldn't stay on the sheet/);
+  assert.ok(result.coords.some(([lon]) => lon > -78.6), "the track reaches Wade Ave");
+});
