@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { EXAMPLE_SHEET_TEXT } from "../src/lib/exampleSheet";
-import { canonicalKey, isPassThrough, titleCaseStreet } from "../src/lib/engine/names";
+import { canonicalKey, isPassThrough, schoolSig, titleCaseStreet } from "../src/lib/engine/names";
 import { classifyLocation, parseSheet } from "../src/lib/engine/parseSheet";
 
 test("parses the made-up example sheet", () => {
@@ -109,4 +109,8 @@ test("ZIP codes and county tags are not part of a street's name", () => {
   assert.equal(titleCaseStreet("WADE AVE 27607"), "Wade Ave");
   assert.ok(isPassThrough("RAMP") && isPassThrough("EXIT 287") && isPassThrough("ROUNDABOUT"));
   assert.ok(!isPassThrough("EXIT RD"));
+});
+
+test("a map's misspelled Elementry still matches an ES stop", () => {
+  assert.deepEqual(schoolSig("White Oak Elementry"), schoolSig("WHITE OAK ES"));
 });

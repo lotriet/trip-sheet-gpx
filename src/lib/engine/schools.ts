@@ -48,6 +48,8 @@ export const KNOWN_SCHOOLS: [name: string, lat: number, lon: number][] = [
   ["Pine Hollow Middle School", 35.90753, -78.73433],
   ["Northwoods Elementary School", 35.79542, -78.79016],
   ["Martin Middle School", 35.81221, -78.68552],
+  // OpenStreetMap spells it "White Oak Elementry".
+  ["White Oak Elementary School", 35.7804, -78.9214],
 ];
 
 /** Wake County, for keeping geocoder answers in the county. */
