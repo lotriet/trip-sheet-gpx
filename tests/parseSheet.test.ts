@@ -114,3 +114,15 @@ test("ZIP codes and county tags are not part of a street's name", () => {
 test("a map's misspelled Elementry still matches an ES stop", () => {
   assert.deepEqual(schoolSig("White Oak Elementry"), schoolSig("WHITE OAK ES"));
 });
+
+test("numbered directions read past the ninth", () => {
+  const sheet = parseSheet(`05:42 AM – 1 OAK RIDGE MS (start)
+1. Proceed On OAK RIDGE MS
+9. Right Turn Onto ROUNDABOUT
+10. Right Turn Onto TOWN HALL DR
+12. Left Turn Onto CHURCH ST 27560
+
+05:58 AM – 250 BATCHELOR RD`);
+  assert.deepEqual(sheet.stops[0].maneuvers.map((m) => m.street), ["OAK RIDGE MS", "ROUNDABOUT", "TOWN HALL DR", "CHURCH ST"]);
+  assert.equal(sheet.stops[1].description, "250 BATCHELOR RD");
+});

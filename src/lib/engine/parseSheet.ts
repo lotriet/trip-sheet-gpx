@@ -21,6 +21,8 @@ function cleanLine(s: string): string {
     .trim()
     // OCR often adds stray marks from the page edge before or after a line.
     .replace(/^[^A-Za-z0-9]+/, "")
+    // A numbered list, as in a converted sheet: "10. Right Turn Onto ...".
+    .replace(/^\d{1,3}[.)]\s+(?=[A-Za-z])/, "")
     // A stray mark or letter in front of a time or a direction: "i 02:36 PM ...".
     .replace(/^(?:\S{1,2}\s+){1,3}(?=(?:\d{1,2}\s?:\s?\d{2}|proceed|continue|right|left|turn)\b)/i, "")
     .replace(/[^A-Za-z0-9)]+$/, "")
