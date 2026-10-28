@@ -106,6 +106,8 @@ test("ZIP codes and county tags are not part of a street's name", () => {
   assert.equal(canonicalKey("CHURCH ST 27560"), canonicalKey("CHURCH ST"));
   assert.equal(canonicalKey("CHURCH ST ,27560"), canonicalKey("CHURCH ST"));
   assert.equal(canonicalKey("OLDE CARPENTER WAY"), canonicalKey("Old Carpenter Way"));
+  assert.equal(canonicalKey("OKELLY CHAPEL RD"), canonicalKey("O’Kelly Chapel Road"));
+  assert.equal(canonicalKey("OKELLY CHAPEL RD"), canonicalKey("O'Kelly Chapel Road"));
   assert.equal(canonicalKey("VANDIVER WAY-CHATHAM CO"), canonicalKey("VANDIVER WAY"));
   assert.equal(titleCaseStreet("WADE AVE 27607"), "Wade Ave");
   assert.ok(isPassThrough("RAMP") && isPassThrough("EXIT 287") && isPassThrough("ROUNDABOUT"));

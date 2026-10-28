@@ -877,19 +877,24 @@ async function routeFrom(
       )) path = null;
     }
     if (far && router && !path) return false;
+    // Two map points of the same corner a few meters apart are not a gap in
+    // the map; only a longer straight line needs the driver to check it.
+    const sameCorner = !path && haversine(from, to) <= 15;
     const line = path ?? [from, to];
     appendLine(coords, line, 0.4);
     node = target;
-    heading = line.length >= 2 ? arrivalHeading(line) : heading;
+    heading = line.length >= 2 && !sameCorner ? arrivalHeading(line) : heading;
     roughHeading = true;
-    warn(
-      path ? "info" : "warn",
-      stopIndex,
-      maneuverIndex,
-      path
-        ? `The map tiles have a gap before ${label}; the road router joined it.`
-        : `${JUMP_NOTE} to ${label} on the map. The track draws a straight line here. Check it.`,
-    );
+    if (!sameCorner) {
+      warn(
+        path ? "info" : "warn",
+        stopIndex,
+        maneuverIndex,
+        path
+          ? `The map tiles have a gap before ${label}; the road router joined it.`
+          : `${JUMP_NOTE} to ${label} on the map. The track draws a straight line here. Check it.`,
+      );
+    }
     return true;
   };
 
