@@ -74,6 +74,8 @@ export function canonicalKey(raw: string): string {
   let s = withoutPlaceTags(raw)
     .toLowerCase()
     .replace(/&/g, " and ")
+    // Sheets print "OKELLY CHAPEL RD" for the map's "O'Kelly Chapel Road".
+    .replace(/['’]/g, "")
     .replace(/[^a-z0-9\s]/g, " ")
     .replace(/\s+/g, " ")
     .trim();
