@@ -1,7 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { ArrowUp, CornerUpLeft, CornerUpRight, House, LoaderCircle, RotateCcw, Trash2 } from "lucide-react";
+import { ArrowUp, CornerUpLeft, CornerUpRight, House, LoaderCircle, RefreshCw, RotateCcw, Trash2 } from "lucide-react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -156,6 +156,7 @@ export function TripApp() {
   const [status, setStatus] = useState("");
   const [routeBuilding, setRouteBuilding] = useState(false);
   const [error, setError] = useState("");
+  const [rebuilding, setRebuilding] = useState(false);
   const [area, setArea] = useState("Wake County, North Carolina");
   const [text, setText] = useState("");
   const [sheet, setSheet] = useState<Sheet>(emptySheet());
@@ -1316,6 +1317,47 @@ export function TripApp() {
     void deliverGpx({ files: [{ name, text: run.gpx }], title: name, source: "single", state: "ready" });
   }
 
+  /**
+   * Route every saved run again with the current app, from its own sheet and
+   * with the driver's turnarounds and via taps. Protected runs keep their GPX.
+   */
+  async function rebuildAllRuns() {
+    if (exportLock.current || rebuilding || !runs.length) return;
+    const todo = runs.filter((run) => !run.locked);
+    if (!todo.length) {
+      setError("Every run is protected. Unlock a run to rebuild it.");
+      return;
+    }
+    setError("");
+    setRebuilding(true);
+    const rebuilt = new Map<string, SavedRun>();
+    let failed = 0;
+    try {
+      for (const [i, run] of todo.entries()) {
+        const prefix = `Rebuilding ${i + 1} of ${todo.length}`;
+        setStatus(`${prefix}…`);
+        try {
+          const parsed = parseSheet(run.sheetText);
+          if (!parsed.stops.length) throw new Error("No stops");
+          const runArea = run.area || area;
+          const data = await cachedMap(parsed, runArea, (s) => setStatus(`${prefix}: ${s}`));
+          const overrides: RouteOverrides = { vias: run.vias ?? [], ...(run.turnarounds ? { turnarounds: run.turnarounds } : {}) };
+          const result = await routeSheet(parsed, data, overrides, osrmRouter);
+          if (!result.ok) throw new Error(result.error);
+          const vias = (run.vias ?? []).map((v, n) => ({ ...v, ...(result.viaStreets[n] ? { street: result.viaStreets[n] } : {}) }));
+          rebuilt.set(run.id, { ...savedRunFrom(run.id, run.sheetText, parsed, result, vias, false, run.turnarounds), area: runArea });
+        } catch {
+          failed++;
+        }
+      }
+    } finally {
+      setStatus("");
+      setRebuilding(false);
+    }
+    if (rebuilt.size) setRuns((prev) => prev.map((run) => rebuilt.get(run.id) ?? run));
+    if (failed) setError(`${failed} run${failed > 1 ? "s" : ""} couldn't be rebuilt and kept ${failed > 1 ? "their" : "its"} old route. Open ${failed > 1 ? "them" : "it"} with Edit.`);
+  }
+
   /** Clear the day's list. Protected runs stay; remove those one at a time. */
   function removeAllRuns() {
     if (exportLock.current || !runs.length) return;
@@ -1721,6 +1763,15 @@ export function TripApp() {
             </article>
             );
           })}
+          {runs.length > 0 && (
+            <div className="flex flex-col items-center gap-1">
+              <Button type="button" variant="outline" className="h-9 border-[#c9d6ea] bg-white px-3 text-xs font-semibold text-[#173b64]" onClick={() => void rebuildAllRuns()} disabled={exportingDay || rebuilding}>
+                <RefreshCw className={`mr-1.5 h-3.5 w-3.5 ${rebuilding ? "animate-spin" : ""}`} aria-hidden />
+                {rebuilding ? "Rebuilding…" : runs.length === 1 ? "Rebuild with latest app" : "Rebuild all with latest app"}
+              </Button>
+              <p className="text-center text-xs text-[#68758a]">Saved runs keep the route they were built with. Rebuild after an app update.</p>
+            </div>
+          )}
           {runs.length > 1 && (
             <div className="flex justify-center">
               <Button type="button" variant="outline" className="h-9 border-[#ecc9c9] bg-white px-3 text-xs font-semibold text-[#8a2a2a]" onClick={removeAllRuns} disabled={exportingDay}>
