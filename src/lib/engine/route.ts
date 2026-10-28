@@ -285,7 +285,7 @@ export function gapLinks(pairs: [string, string][], lines: GraphLine[]): GraphLi
   return out;
 }
 
-function resolveTarget(
+export function resolveTarget(
   raw: string,
   available: Set<string>,
   places: RawPlace[],

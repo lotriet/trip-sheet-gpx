@@ -115,7 +115,8 @@ export type RouteLeg = {
 export type TurnMark = {
   stopIndex: number;
   maneuverIndex: number;
-  kind: "left" | "right" | "turnaround";
+  /** "proceed" only on a recorded drive: where it gets onto a printed street. */
+  kind: "left" | "right" | "turnaround" | "proceed";
   street: string;
   /** Index into the track coordinate array. */
   trackIndex: number;

@@ -60,9 +60,9 @@ function numberIcon(n: number) {
   });
 }
 
-/** L, R or U where the track turns. Amber when the router could not confirm the intersection. */
+/** L, R or U where the track turns, ↑ where a recorded drive gets onto a printed street. Amber when the router could not confirm the intersection. */
 function turnIcon(pin: TurnPin) {
-  const letter = pin.kind === "left" ? "L" : pin.kind === "right" ? "R" : "U";
+  const letter = pin.kind === "left" ? "L" : pin.kind === "right" ? "R" : pin.kind === "proceed" ? "↑" : "U";
   const fill = pin.confirmed ? "#ffffff" : "#f59e0b";
   return L.divIcon({
     className: "turn-pin",

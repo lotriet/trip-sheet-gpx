@@ -22,7 +22,7 @@ import { RETAKE_MESSAGE } from "@/lib/ocr/quality";
 import { loadDay, saveDay, type SavedRun } from "@/lib/storage";
 import { dwellsOf, recordedFixes, stopsFromRecording } from "@/lib/recording";
 import { useNewVersionReload } from "@/lib/newVersion";
-import { routeFromDrive } from "@/lib/driven";
+import { placeNear, routeFromDrive } from "@/lib/driven";
 import { autoGroup, buildTrips, describePage, dropDuplicatePages, gpxFileName, mergeIntoDay, newTripKey, sheetProblems, sortStopsByTime, splitRuns, type PageInfo, type PageRead, type Trip } from "@/lib/batch";
 import { canShareFiles, sendNativeGpx, shareOrDownload, type TextFile } from "@/lib/shareFiles";
 import { buildStreetIndex, checkStop, checkStreet, looseName, sheetStyle, suggestFor as suggestNames } from "@/lib/streetCheck";
@@ -1392,7 +1392,13 @@ export function TripApp() {
           const result = await routeSheet(parsed, data, overrides, osrmRouter);
           if (!result.ok) throw new Error(result.error);
           const vias = (run.vias ?? []).map((v, n) => ({ ...v, ...(result.viaStreets[n] ? { street: result.viaStreets[n] } : {}) }));
-          const drive = fromDrive ? routeFromDrive(parsed, result, fixes) : null;
+          let drive = fromDrive ? routeFromDrive(parsed, result, fixes, { lines: data.lines, places: data.places }) : null;
+          if (drive && (drive.start || drive.end)) {
+            // Name where the bus set off from and parked, such as the school it waits at.
+            const nameOf = async (p?: LonLat) => (p ? placeNear((await loadAround({ lat: p[1], lon: p[0] }).catch(() => ({ places: [] }))).places, p) : undefined);
+            const [startName, endName] = await Promise.all([nameOf(drive.start), nameOf(drive.end)]);
+            drive = routeFromDrive(parsed, result, fixes, { lines: data.lines, places: data.places, startName, endName }) ?? drive;
+          }
           if (drive) drivenRuns++;
           rebuilt.set(run.id, { ...savedRunFrom(run.id, run.sheetText, parsed, drive?.route ?? result, vias, false, run.turnarounds, stopPins), area: runArea, driven: !!drive });
         } catch {
