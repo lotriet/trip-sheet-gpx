@@ -238,6 +238,9 @@ export function routeFromDrive(
     warnings.push({ level: "info", stopIndex: -1, maneuverIndex: -1, message: `The recorded drive doesn't take the sheet's ${missed}, so that turn is left out.` });
   }
   const meters = polylineMeters(coords);
+  // Stops in the order they come along the track, the driver's order: the
+  // run's file and the day file list them so, and GPX Nav follows that order.
+  const inDriveOrder = [...newStops].sort((x, y) => x.trackIndex - y.trackIndex);
   turnMarks.sort((x, y) => x.trackIndex - y.trackIndex);
   return {
     route: {
@@ -245,11 +248,10 @@ export function routeFromDrive(
       coords,
       meters,
       miles: meters / 1609.344,
-      stops: newStops,
+      stops: inDriveOrder,
       turnMarks,
       warnings,
-      // Stops in the order they come along the track, the driver's order.
-      gpx: buildGpx({ ...sheet, description: `${sheet.description} (recorded drive)`.trim() }, coords, [...newStops].sort((x, y) => x.trackIndex - y.trackIndex), turnMarks),
+      gpx: buildGpx({ ...sheet, description: `${sheet.description} (recorded drive)`.trim() }, coords, inDriveOrder, turnMarks),
     },
     stopsOnDrive: at,
     legsDriven: driven.size,
