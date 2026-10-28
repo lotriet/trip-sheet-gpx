@@ -513,6 +513,20 @@ function canTurn(node: GraphNode, heading: number | null, key: string, dir: "lef
   return !!t && t.matched && Math.abs(t.angle) < 165;
 }
 
+/**
+ * A divided road the bus meets on its near carriageway, where the turn only
+ * works from the far one: the short gap straight across the median.
+ */
+function acrossMedian(node: GraphNode, heading: number | null, key: string, dir: "left" | "right", graph: Graph): GraphEdge | null {
+  if (heading == null) return null;
+  for (const e of node.out) {
+    if (edgeServes(e, key) || e.length > 40 || Math.abs(turnAngle(heading, departureHeading(e.coords))) > 35) continue;
+    const far = graph.nodes.get(e.to);
+    if (far && canTurn(far, arrivalHeading(e.coords), key, dir, graph)) return e;
+  }
+  return null;
+}
+
 function nearestNode(graph: Graph, key: string, point: LonLat, maxM: number): GraphNode | null {
   let best: { n: GraphNode; d: number } | null = null;
   for (const n of graph.nodes.values()) {
@@ -1136,6 +1150,14 @@ async function routeFrom(
         } else if (target.how !== "missing" && !(await jumpTo(target.key, maneuver.street, stopIndex, maneuverIndex))) {
           warn("warn", stopIndex, maneuverIndex, `Couldn't follow the sheet onto ${maneuver.street}.`);
         }
+      }
+      const cross = target.how !== "missing" && !canTurn(node, heading, target.key, dir, graph)
+        ? acrossMedian(node, heading, target.key, dir, graph)
+        : null;
+      if (cross) {
+        appendLine(coords, cross.coords, 0.4);
+        node = graph.nodes.get(cross.to) ?? node;
+        heading = arrivalHeading(cross.coords);
       }
       if (target.how !== "missing") {
         const turn = chooseTurn(node, heading, target.key, dir, graph);

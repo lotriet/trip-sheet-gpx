@@ -28,3 +28,22 @@ test("only unsure stops are moved, each to its own standstill in order", () => {
   ];
   assert.deepEqual(stopsFromRecording(stops, dwells, new Set([2])), { 2: { lat: 35.803, lon: -78.8 } });
 });
+
+test("a gap in the track that ends a few meters on is a standstill", () => {
+  // The recorder logs nothing for 17 s while the bus stands, then it creeps off.
+  const gappy = `<gpx><trk><trkseg>${[at(35.8, -78.8, 0), at(35.8, -78.8002, 17), at(35.801, -78.8, 40)].join("")}</trkseg></trk></gpx>`;
+  const dwells = dwellsOf(recordedFixes(gappy), minuteOf);
+  assert.deepEqual(dwells.map((d) => [d.lat, d.seconds]), [[35.8, 17]]);
+});
+
+test("a bus running late still has its unsure stops matched", () => {
+  const dwells = dwellsOf(recordedFixes(gpx), minuteOf);
+  // The same drive as printed ten minutes earlier on the sheet.
+  const stops = [
+    { time: "5:40 AM", lat: 35.79, lon: -78.8 },
+    { time: "5:50 AM", lat: 35.8, lon: -78.8 },
+    { time: "5:52 AM", lat: 35.8, lon: -78.8 },
+    { time: "5:53 AM", lat: 35.806, lon: -78.8 },
+  ];
+  assert.deepEqual(stopsFromRecording(stops, dwells, new Set([2])), { 2: { lat: 35.803, lon: -78.8 } });
+});
