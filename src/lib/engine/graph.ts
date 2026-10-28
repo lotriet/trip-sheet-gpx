@@ -409,25 +409,39 @@ function bridgeNamedGaps(
   edges: GraphEdge[],
   nextId: () => number,
 ): number {
-  const keys = new Set<string>();
-  for (const e of edges) for (const k of e.keys) if (!k.startsWith("place:")) keys.add(k);
+  // Each street's edges, found in one pass: scanning every edge and node per
+  // street was quadratic and slowed a county-sized map to minutes.
+  const byKey = new Map<string, GraphEdge[]>();
+  for (const e of edges) {
+    if (e.synthetic) continue;
+    for (const k of e.keys) {
+      if (k.startsWith("place:")) continue;
+      let list = byKey.get(k);
+      if (!list) byKey.set(k, (list = []));
+      list.push(e);
+    }
+  }
   let bridges = 0;
   const seen = new Set<string>();
 
-  for (const key of keys) {
+  for (const [key, keyEdges] of byKey) {
     // A road end has one neighbor on this street counting both directions.
     // Counting only outgoing edges made every node of a one-way road (each
     // carriageway of a divided road) an "end", which bridged the carriageways
     // with invented straight links.
     const outsOf = new Map<string, GraphEdge[]>();
     const insOf = new Map<string, GraphEdge[]>();
-    for (const e of edges) {
-      if (!e.keys.includes(key) || e.synthetic) continue;
+    const touched = new Set<string>();
+    for (const e of keyEdges) {
       outsOf.set(e.from, [...(outsOf.get(e.from) ?? []), e]);
       insOf.set(e.to, [...(insOf.get(e.to) ?? []), e]);
+      touched.add(e.from);
+      touched.add(e.to);
     }
     const ends: { node: GraphNode; heading: number; arrives: boolean; leaves: boolean }[] = [];
-    for (const n of nodes.values()) {
+    for (const id of touched) {
+      const n = nodes.get(id);
+      if (!n) continue;
       const outs = outsOf.get(n.id) ?? [];
       const ins = insOf.get(n.id) ?? [];
       const neighbors = new Set([...outs.map((e) => e.to), ...ins.map((e) => e.from)]);
