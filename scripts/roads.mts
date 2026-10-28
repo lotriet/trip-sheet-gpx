@@ -144,6 +144,14 @@ for (const el of data.elements) {
   if (oneway) way.o = oneway;
   if (tags.service) way.s = tags.service;
   if (tags.access) way.a = tags.access;
+  if (tags.highway.endsWith("_link")) way.l = 1;
+  // Sheets often use a road's other name: Wade Ave is the map's
+  // "Raleigh Chapel–Hill Expressway" with alt_name "Wade Avenue".
+  const also = ["alt_name", "name_1", "old_name", "official_name"]
+    .flatMap((k) => (tags[k] ?? "").split(";"))
+    .map((n) => n.trim())
+    .filter((n) => n && n !== tags.name);
+  if (also.length) way.an = [...new Set(also)];
   // A way crossing cells is stored whole in each, so every cell sees its ends.
   const touched = new Set(el.geometry.map((p) => cellOf(p.lon, p.lat)));
   for (const name of touched) cell(name).ways.push(way);

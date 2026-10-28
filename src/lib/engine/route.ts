@@ -923,8 +923,73 @@ async function routeFrom(
   };
 
   let inRoundabout = false;
+  /**
+   * "Proceed Onto I - 40": the street map has the highway, but not how its
+   * ramps join the roads around it. Let the road router drive from here to
+   * the sheet's next turn off it ("Left Turn Onto RIDGE RD"), and pick up the
+   * sheet there. Returns the index of that turn, or -1 to drive it as usual.
+   */
+  const highwayHop = async (i: number): Promise<number> => {
+    if (!router || !currentKey) return -1;
+    const { stopIndex } = flat[i];
+    let j = i + 1;
+    while (j < flat.length && flat[j].stopIndex === stopIndex &&
+      (flat[j].maneuver.kind === "proceed" || isPassThrough(flat[j].maneuver.street))) j++;
+    if (j >= flat.length || flat[j].stopIndex !== stopIndex) return -1;
+    const exitKey = resolveTarget(flat[j].maneuver.street, available, places).key;
+    const prev = flat[j - 1].maneuver.street;
+    const onKey = resolveTarget(isPassThrough(prev) ? flat[i].maneuver.street : prev, available, places).key;
+    if (!exitKey || !onKey) return -1;
+    // Where the street we leave on passes the last road named before it.
+    const on: GraphNode[] = [];
+    const exits: GraphNode[] = [];
+    for (const n of graph.nodes.values()) {
+      if (nodeHas(n, onKey)) on.push(n);
+      if (nodeHas(n, exitKey)) exits.push(n);
+    }
+    let target: { n: GraphNode; d: number } | null = null;
+    for (const n of exits) {
+      const d = haversine(n.coord, node.coord);
+      if (target && d >= target.d) continue;
+      if (on.some((m) => haversine(m.coord, n.coord) <= 300)) target = { n, d };
+    }
+    if (!target || target.d > 30000) return -1;
+    let path: LonLat[] | null = null;
+    try {
+      path = await router([node.coord, target.n.coord]);
+    } catch {
+      path = null;
+    }
+    if (!path || path.length < 2 || haversine(path.at(-1)!, target.n.coord) > 80 ||
+      polylineMeters(path) > 2 * target.d + 1500) return -1;
+    const before = polylineMeters(coords);
+    appendLine(coords, path, 0.4);
+    for (let k = i; k <= j; k++) {
+      const m = flat[k];
+      legs.push({ stopIndex: m.stopIndex, maneuverIndex: m.maneuverIndex, kind: m.maneuver.kind as ManeuverKind, street: m.maneuver.street, meters: k === i ? polylineMeters(coords) - before : 0 });
+    }
+    const turn = flat[j];
+    if (turn.maneuver.kind === "left" || turn.maneuver.kind === "right") {
+      turnMarks.push({ stopIndex: turn.stopIndex, maneuverIndex: turn.maneuverIndex, kind: turn.maneuver.kind, street: turn.maneuver.street, trackIndex: coords.length - 1, confirmed: true });
+    }
+    node = target.n;
+    heading = arrivalHeading(path);
+    roughHeading = true;
+    currentKey = exitKey;
+    skipTurnAt = null;
+    inRoundabout = false;
+    return j;
+  };
+
   for (let i = 0; i < flat.length; i++) {
     const { stopIndex, maneuverIndex, maneuver } = flat[i];
+    if (maneuver.kind === "proceed" && /^I\s*-?\s*\d+$/i.test(maneuver.street.trim())) {
+      const j = await highwayHop(i);
+      if (j >= 0) {
+        i = j;
+        continue;
+      }
+    }
     if (isPassThrough(maneuver.street)) {
       // "Right Turn Onto ROUNDABOUT", "Left Turn On ROUNDABOUT", "Right Turn
       // Onto RAMP", "Proceed Onto EXIT 287": drive into or through it. The next
