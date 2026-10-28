@@ -4,7 +4,7 @@ import { haversine } from "./engine/geo";
 /** A place the bus stood still on a recorded drive. */
 export type Dwell = { lat: number; lon: number; minute: number; seconds: number };
 
-type Fix = { lat: number; lon: number; t: number };
+export type Fix = { lat: number; lon: number; t: number };
 
 /** Track points with times from a GPX file (GPX Tracker, GPX Nav). */
 export function recordedFixes(gpx: string): Fix[] {
