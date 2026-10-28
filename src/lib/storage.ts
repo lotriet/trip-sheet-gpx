@@ -26,6 +26,8 @@ export type SavedRun = {
   vias?: { lat: number; lon: number; street?: string }[];
   /** Turnarounds the driver moved, by pin id. Old saved runs omit this. */
   turnarounds?: Record<string, { lat: number; lon: number }>;
+  /** Where the bus really stops, from a recorded drive, by stop index. Old saved runs omit this. */
+  stopPins?: Record<number, { lat: number; lon: number; description: string }>;
 };
 
 function openDb(): Promise<IDBDatabase> {

@@ -530,23 +530,28 @@ function roadCell(name: string): Promise<RoadCell> {
  * which join exactly at every corner, else the public map tiles.
  */
 async function readMap(area: Bbox | Tile[], onStatus?: (s: string) => void): Promise<MapData> {
-  const boxes = Array.isArray(area) ? area.map(tileBox) : [area];
+  // Tiles inside the county come from the road files; only those reaching
+  // past its edge are read from the public tiles.
+  const tiles = Array.isArray(area) ? area : null;
+  const inside: Bbox[] = [];
+  const outside: Tile[] = [];
   const names = new Set<string>();
-  let covered = boxes.length > 0;
-  for (const box of boxes) {
+  for (const [i, box] of (tiles ? tiles.map(tileBox) : [area as Bbox]).entries()) {
     const cells = cellsFor(box);
     if (!cells) {
-      covered = false;
-      break;
+      if (!tiles) return readTiles(area, onStatus);
+      outside.push(tiles[i]);
+      continue;
     }
+    inside.push(box);
     for (const c of cells) names.add(c);
   }
-  if (covered) {
+  if (inside.length) {
     try {
       onStatus?.("Reading the road map…");
       const data = linesFromCells(await Promise.all([...names].map(roadCell)));
       // No roads at all means the road files are missing, not an empty county.
-      if (data.lines.length) return data;
+      if (data.lines.length) return outside.length ? mergeMaps(data, await readTiles(outside, onStatus)) : data;
     } catch {
       /* the public tiles below still have the roads */
     }

@@ -99,6 +99,8 @@ export type RouteOverrides = {
   turnarounds?: Record<string, { lat: number; lon: number }>;
   /** Extra points the track must pass, in order. `street` is the road nearest the tap. */
   vias?: { lat: number; lon: number; street?: string }[];
+  /** Where the bus really stops, from a recorded drive. Key is the stop's index on the sheet. */
+  stops?: Record<number, { lat: number; lon: number }>;
 };
 
 export type RouteLeg = {

@@ -20,6 +20,7 @@ import { isPdf, pdfToPageImages } from "@/lib/pdfPages";
 import { osrmRouter } from "@/lib/osrm";
 import { RETAKE_MESSAGE } from "@/lib/ocr/quality";
 import { loadDay, saveDay, type SavedRun } from "@/lib/storage";
+import { dwellsOf, recordedFixes, stopsFromRecording } from "@/lib/recording";
 import { autoGroup, buildTrips, describePage, dropDuplicatePages, gpxFileName, mergeIntoDay, newTripKey, sheetProblems, sortStopsByTime, splitRuns, type PageInfo, type PageRead, type Trip } from "@/lib/batch";
 import { canShareFiles, sendNativeGpx, shareOrDownload, type TextFile } from "@/lib/shareFiles";
 import { buildStreetIndex, checkStop, checkStreet, looseName, sheetStyle, suggestFor as suggestNames } from "@/lib/streetCheck";
@@ -125,6 +126,20 @@ function mapCacheKey(sheet: Sheet, area: string): string {
   return `${area.trim().toLowerCase()}|${streets.slice(0, 8).join("|")}`;
 }
 
+/** Saved stop pins still on the same stops of this sheet, as the engine takes them. */
+function pinsFor(sheet: Sheet, pins: SavedRun["stopPins"]): RouteOverrides["stops"] {
+  const out: NonNullable<RouteOverrides["stops"]> = {};
+  for (const [k, p] of Object.entries(keptPins(sheet, pins) ?? {})) out[Number(k)] = { lat: p.lat, lon: p.lon };
+  return out;
+}
+
+/** Drop pins whose stop was edited away or moved to another place on the sheet. */
+function keptPins(sheet: Sheet, pins: SavedRun["stopPins"]): SavedRun["stopPins"] {
+  if (!pins) return undefined;
+  const kept = Object.fromEntries(Object.entries(pins).filter(([k, p]) => sheet.stops[Number(k)]?.description === p.description));
+  return Object.keys(kept).length ? kept : undefined;
+}
+
 async function cachedMap(sheet: Sheet, area: string, onStatus?: (s: string) => void): Promise<MapData> {
   const key = mapCacheKey(sheet, area);
   const hit = mapCache.get(key);
@@ -157,6 +172,9 @@ export function TripApp() {
   const [routeBuilding, setRouteBuilding] = useState(false);
   const [error, setError] = useState("");
   const [rebuilding, setRebuilding] = useState(false);
+  const [notice, setNotice] = useState("");
+  /** Stop pins of the saved run open in the editor. */
+  const [editPins, setEditPins] = useState<SavedRun["stopPins"]>(undefined);
   const [area, setArea] = useState("Wake County, North Carolina");
   const [text, setText] = useState("");
   const [sheet, setSheet] = useState<Sheet>(emptySheet());
@@ -571,6 +589,7 @@ export function TripApp() {
 
   function openNew() {
     setEditingId(null);
+    setEditPins(undefined);
     setDraftId(newId());
     setDraftActive(true);
     setDirectionMapStop(null);
@@ -615,7 +634,8 @@ export function TripApp() {
     setEditorWarningCursor(0);
     pendingEditorWarning.current = mappedWarnings.length ? mappedWarnings[0] : null;
     setMapData(null);
-    setOverrides({ vias: run.vias ?? [], ...(run.turnarounds ? { turnarounds: run.turnarounds } : {}) });
+    setOverrides({ vias: run.vias ?? [], ...(run.turnarounds ? { turnarounds: run.turnarounds } : {}), stops: pinsFor(parsed, run.stopPins) });
+    setEditPins(run.stopPins);
     setError("");
     setView("edit");
   }
@@ -683,6 +703,7 @@ export function TripApp() {
     setDraftId(draft.id);
     setDraftActive(true);
     setEditingId(draft.editingId);
+    setEditPins(runs.find((run) => run.id === draft.editingId)?.stopPins);
     setText(draft.text);
     setSheet(draft.sheet);
     setArea(draft.area);
@@ -830,7 +851,7 @@ export function TripApp() {
     if (reviewKey === from) setReviewKey(null);
   }
 
-  function savedRunFrom(id: string, sheetText: string, built: Sheet, result: RouteSuccess, vias: { lat: number; lon: number; street?: string }[] = [], warningsAcknowledged = false, turnarounds?: RouteOverrides["turnarounds"]): SavedRun {
+  function savedRunFrom(id: string, sheetText: string, built: Sheet, result: RouteSuccess, vias: { lat: number; lon: number; street?: string }[] = [], warningsAcknowledged = false, turnarounds?: RouteOverrides["turnarounds"], stopPins?: SavedRun["stopPins"]): SavedRun {
     return {
       id,
       area,
@@ -847,6 +868,7 @@ export function TripApp() {
       warningsAcknowledged,
       vias,
       ...(turnarounds && Object.keys(turnarounds).length ? { turnarounds } : {}),
+      ...(stopPins && Object.keys(stopPins).length ? { stopPins } : {}),
     };
   }
 
@@ -894,6 +916,7 @@ export function TripApp() {
   function openTrip(trip: Trip) {
     const edit = tripEdits[trip.key];
     setEditingId(null);
+    setEditPins(undefined);
     setDraftActive(false);
     setReviewKey(trip.key);
     setSuggestFor(null);
@@ -1240,7 +1263,7 @@ export function TripApp() {
       setError("This GPX is locked. Return to today’s list and unlock it before replacing the saved track.");
       return;
     }
-    const saved = savedRunFrom(editingId ?? newId(), text, sheet, route, overrides.vias ?? [], warningAcknowledged, overrides.turnarounds);
+    const saved = savedRunFrom(editingId ?? newId(), text, sheet, route, overrides.vias ?? [], warningAcknowledged, overrides.turnarounds, keptPins(sheet, editPins));
     const willFinishReview = !reviewKey || trips.every((trip) => trip.key === reviewKey || tripStates[trip.key]?.state === "added");
     const file = {
       name: runFileName(0, { run: saved.run, description: saved.description, firstTime: saved.firstTime }),
@@ -1321,7 +1344,7 @@ export function TripApp() {
    * Route every saved run again with the current app, from its own sheet and
    * with the driver's turnarounds and via taps. Protected runs keep their GPX.
    */
-  async function rebuildAllRuns() {
+  async function rebuildAllRuns(recordings?: string[]) {
     if (exportLock.current || rebuilding || !runs.length) return;
     const todo = runs.filter((run) => !run.locked);
     if (!todo.length) {
@@ -1329,9 +1352,17 @@ export function TripApp() {
       return;
     }
     setError("");
+    setNotice("");
     setRebuilding(true);
+    const dwells = recordings ? recordings.flatMap((gpx) => dwellsOf(recordedFixes(gpx))) : [];
+    if (recordings && !dwells.length) {
+      setRebuilding(false);
+      setError("That file has no timed track points, so there is nothing to match. Pick a GPX recorded on the drive.");
+      return;
+    }
     const rebuilt = new Map<string, SavedRun>();
     let failed = 0;
+    let moved = 0;
     try {
       for (const [i, run] of todo.entries()) {
         const prefix = `Rebuilding ${i + 1} of ${todo.length}`;
@@ -1339,13 +1370,23 @@ export function TripApp() {
         try {
           const parsed = parseSheet(run.sheetText);
           if (!parsed.stops.length) throw new Error("No stops");
+          let stopPins = keptPins(parsed, run.stopPins);
+          if (dwells.length) {
+            // Stops the route couldn't pin down move to where the bus stood still.
+            const unsure = new Set(run.warnings.filter((w) => w.level === "warn" && w.maneuverIndex === -1 && typeof w.stopIndex === "number" && w.stopIndex >= 0).map((w) => w.stopIndex as number));
+            const found = stopsFromRecording(run.stops, dwells, unsure);
+            for (const [k, p] of Object.entries(found)) {
+              stopPins = { ...stopPins, [k]: { ...p, description: parsed.stops[Number(k)]?.description ?? "" } };
+              moved++;
+            }
+          }
           const runArea = run.area || area;
           const data = await cachedMap(parsed, runArea, (s) => setStatus(`${prefix}: ${s}`));
-          const overrides: RouteOverrides = { vias: run.vias ?? [], ...(run.turnarounds ? { turnarounds: run.turnarounds } : {}) };
+          const overrides: RouteOverrides = { vias: run.vias ?? [], ...(run.turnarounds ? { turnarounds: run.turnarounds } : {}), stops: pinsFor(parsed, stopPins) };
           const result = await routeSheet(parsed, data, overrides, osrmRouter);
           if (!result.ok) throw new Error(result.error);
           const vias = (run.vias ?? []).map((v, n) => ({ ...v, ...(result.viaStreets[n] ? { street: result.viaStreets[n] } : {}) }));
-          rebuilt.set(run.id, { ...savedRunFrom(run.id, run.sheetText, parsed, result, vias, false, run.turnarounds), area: runArea });
+          rebuilt.set(run.id, { ...savedRunFrom(run.id, run.sheetText, parsed, result, vias, false, run.turnarounds, stopPins), area: runArea });
         } catch {
           failed++;
         }
@@ -1355,7 +1396,14 @@ export function TripApp() {
       setRebuilding(false);
     }
     if (rebuilt.size) setRuns((prev) => prev.map((run) => rebuilt.get(run.id) ?? run));
+    if (recordings) setNotice(moved ? `Moved ${moved} stop${moved > 1 ? "s" : ""} to where the bus stopped on the recorded drive.` : "No stop with a warning matched a stop on the recorded drive. Check that the recording is from these runs.");
     if (failed) setError(`${failed} run${failed > 1 ? "s" : ""} couldn't be rebuilt and kept ${failed > 1 ? "their" : "its"} old route. Open ${failed > 1 ? "them" : "it"} with Edit.`);
+  }
+
+  async function matchRecordings(files: FileList | null) {
+    if (!files?.length) return;
+    const texts = await Promise.all([...files].map((f) => f.text()));
+    await rebuildAllRuns(texts);
   }
 
   /** Clear the day's list. Protected runs stay; remove those one at a time. */
@@ -1769,7 +1817,12 @@ export function TripApp() {
                 <RefreshCw className={`mr-1.5 h-3.5 w-3.5 ${rebuilding ? "animate-spin" : ""}`} aria-hidden />
                 {rebuilding ? "Rebuilding…" : runs.length === 1 ? "Rebuild with latest app" : "Rebuild all with latest app"}
               </Button>
-              <p className="text-center text-xs text-[#68758a]">Saved runs keep the route they were built with. Rebuild after an app update.</p>
+              <label className={`inline-flex h-9 cursor-pointer items-center rounded-md border border-[#c9d6ea] bg-white px-3 text-xs font-semibold text-[#173b64] ${exportingDay || rebuilding ? "pointer-events-none opacity-50" : ""}`}>
+                Match stops to a recorded drive
+                <input type="file" accept=".gpx,application/gpx+xml,application/xml,text/xml" multiple className="sr-only" disabled={exportingDay || rebuilding} onChange={(e) => { void matchRecordings(e.currentTarget.files); e.currentTarget.value = ""; }} />
+              </label>
+              <p className="text-center text-xs text-[#68758a]">Saved runs keep the route they were built with. Rebuild after an app update. A GPX recorded on the drive moves stops with warnings to where the bus stopped.</p>
+              {notice && <p className="text-center text-sm font-medium text-[#216338]">{notice}</p>}
             </div>
           )}
           {runs.length > 1 && (

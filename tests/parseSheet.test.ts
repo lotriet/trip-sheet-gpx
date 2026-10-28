@@ -129,3 +129,10 @@ test("numbered directions read past the ninth", () => {
   assert.deepEqual(sheet.stops[0].maneuvers.map((m) => m.street), ["ALSTON RIDGE MS", "ROUNDABOUT", "TOWN HALL DR", "CHURCH ST"]);
   assert.equal(sheet.stops[1].description, "1133 BATCHELOR RD");
 });
+
+test("a driver note after a dash and a landmark after @ are not street names", () => {
+  assert.deepEqual(classifyLocation("OAK AVE & ELM LN - SIT BEHIND DRIVER"), { kind: "intersection", a: "OAK AVE", b: "ELM LN" });
+  assert.deepEqual(classifyLocation("OAK PL & PINE DR@MAILBOXES"), { kind: "intersection", a: "OAK PL", b: "PINE DR" });
+  assert.deepEqual(classifyLocation("MAPLE RD @ POOL LOT"), { kind: "end", street: "MAPLE RD" });
+  assert.deepEqual(classifyLocation("ASH LN-CHATHAM CO & BIRCH DR-CHATHAM CO"), { kind: "intersection", a: "ASH LN-CHATHAM CO", b: "BIRCH DR-CHATHAM CO" });
+});

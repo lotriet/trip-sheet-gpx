@@ -123,10 +123,14 @@ function lineNear(coords: LonLat[], point: LonLat, maxM: number): boolean {
 type MappedRoad = { coords: LonLat[]; minLon: number; maxLon: number; minLat: number; maxLat: number };
 
 /** Real (not synthetic) road geometry with bounding boxes, for quick nearness checks. */
+/** Every road of the map a graph was built from, not only the streets on the sheet. */
+const allRoads = new WeakMap<Graph, RawLine[]>();
+
 function mappedRoadIndex(graph: Graph): MappedRoad[] {
   const out: MappedRoad[] = [];
-  for (const edge of graph.edges) {
-    if (edge.synthetic || edge.coords.length < 2) continue;
+  const lines = [...graph.edges.filter((edge) => !edge.synthetic), ...(allRoads.get(graph) ?? [])];
+  for (const edge of lines) {
+    if (edge.coords.length < 2) continue;
     let minLon = Infinity, maxLon = -Infinity, minLat = Infinity, maxLat = -Infinity;
     for (const [lon, lat] of edge.coords) {
       if (lon < minLon) minLon = lon;
@@ -1217,6 +1221,21 @@ async function routeFrom(
 
   // A tap that never landed on the street being driven still has to move the track.
   const inserted = await pullVias(coords, vias, router, (level, message) => warn(level, -1, -1, message));
+  // A stop seen on a recorded drive off the track (up a street and round a
+  // roundabout the sheet only hints at): drive there and back by road.
+  for (const pin of Object.values(overrides.stops ?? {})) {
+    const point: LonLat = [pin.lon, pin.lat];
+    if (!router || coords.length < 2 || minDistToLine(point, coords).d <= VIA_ON_TRACK_M) continue;
+    const near = minDistToLine(point, coords).point;
+    let path: LonLat[] | null = null;
+    try {
+      path = await router([near, point, near]);
+    } catch {
+      path = null;
+    }
+    if (!path || path.length < 2 || minDistToLine(point, path).d > 40 || polylineMeters(path) > 5 * haversine(near, point) + 800) continue;
+    inserted.push(insertOutAndBack(coords, point, path));
+  }
   // Via detours are spliced into the track; keep recorded indices on the same points.
   for (const { at, count } of inserted) {
     for (const anchor of anchors) if (anchor.at >= at) anchor.at += count;
@@ -1232,11 +1251,11 @@ async function routeFrom(
     if (!edge.synthetic || edge.coords.length < 2) continue;
     // A bridge laid over road the map already has (tile pieces that overlap)
     // is not an assumed connection: the bus drives mapped road there.
+    if (!trackUsesLine(coords, edge.coords)) continue;
     if (overliesMappedRoad(edge.coords, mapped)) continue;
     const a = edge.coords[0];
     const b = edge.coords.at(-1)!;
     const mid: LonLat = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
-    if (!trackUsesLine(coords, edge.coords)) continue;
     const key = `${mid[0].toFixed(4)},${mid[1].toFixed(4)}`;
     if (syntheticSeen.has(key)) continue;
     syntheticSeen.add(key);
@@ -1273,7 +1292,7 @@ async function routeFrom(
   }
 
   // Place stops along the finished track.
-  const placement = placeStops(sheet, coords, anchors, turnMarks, graph, available, places, addresses);
+  const placement = placeStops(sheet, coords, anchors, turnMarks, graph, available, places, addresses, overrides.stops);
   warnings.push(...placement.warnings);
   const meters = polylineMeters(coords);
   const gpx = buildGpx(sheet, coords, placement.stops, turnMarks);
@@ -1396,6 +1415,7 @@ function placeStops(
   available: Set<string>,
   places: RawPlace[],
   addresses: RawAddress[],
+  pins: RouteOverrides["stops"] = {},
 ): { stops: RouteSuccess["stops"]; warnings: Warning[] } {
   const out: RouteSuccess["stops"] = [];
   const warnings: Warning[] = [];
@@ -1417,9 +1437,19 @@ function placeStops(
     let at = minAt;
     let placed = index === 0;
 
+    const pin = index > 0 ? pins[index] : undefined;
     if (index === 0) {
       coord = track[0];
       at = 0;
+    } else if (pin) {
+      // A spot the bus was seen stopping at on a recorded drive.
+      const hit = nearestIndex(track, [pin.lon, pin.lat], minAt);
+      at = hit.index;
+      coord = track[at];
+      placed = true;
+      if (hit.d > 100) {
+        warnings.push({ level: "warn", stopIndex: index, maneuverIndex: -1, message: `The route passes ${Math.round(hit.d)} m from where the bus stopped for “${stop.description}” on the recorded drive. Check this stop marker.` });
+      }
     } else if (loc.kind === "school") {
       const p = matchPlace(loc.name, places);
       const key = p ? placeRouteKey(p) : "";
@@ -1555,6 +1585,7 @@ export async function routeSheet(
   const pairs = meetingPairs(sheet, lineKeys, data.places);
   graphLines.push(...gapLinks(pairs, graphLines));
   const graph = buildGraph(graphLines, linkKeys, new Set(pairs.map((p) => [...p].sort().join("|"))));
+  allRoads.set(graph, data.lines);
   const available = keysInGraph(graph);
   // Where the track starts: the first stop, or, when the map can't place it,
   // the next stop that it can (the start is then flagged for the driver to check).

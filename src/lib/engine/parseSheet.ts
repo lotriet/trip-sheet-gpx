@@ -115,11 +115,15 @@ function tidyStreet(s: string): string {
   return trimCrumbs(s.replace(/\s+\d{3}\.\d{3}\s*$/, "").replace(/[.,;:]+$/, "").trim());
 }
 
+const STREET_WORD = /\b(?:rd|road|dr|drive|ln|lane|st|street|ave|avenue|ct|court|pl|place|way|blvd|pkwy|parkway|cir|circle|trl|trail|hwy|loop|ter|run|xing|sq|cv|cove)\b/i;
+
 export function classifyLocation(description: string): StopLocation {
   let d = description.replace(/\s+/g, " ").trim();
   d = d.replace(/^\s*deadhead\s*-?\s*/i, "").trim();
   // "- DOORSIDE", "(DOORSIDE)", or "DOORSIDE" wrapped onto its own line.
   d = d.replace(/\s*-?\s*\(?\bdoorside\b\)?.*$/i, "").replace(/\s*-\s*$/, "").trim();
+  // "- SIT BEHIND DRIVER": a note for the driver, not part of a street name.
+  d = d.replace(/\s+-\s+([^&@]*)$/, (note, text: string) => (STREET_WORD.test(text) ? note : "")).trim();
   const school = d.match(/^(?:school\s*:\s*)(.+)$/i);
   if (school) return { kind: "school", name: school[1].trim() };
   // "1 OAK HS": a campus written with a street number.
@@ -129,7 +133,9 @@ export function classifyLocation(description: string): StopLocation {
   if (!/[&@]/.test(d) && looksLikePlace(campus)) return { kind: "school", name: campus };
   if (/@/.test(d) || /end of(?: the)? (sidewalk|road|street|court)/i.test(d)) {
     const street = d.split("@")[0].replace(/\bend of\b.*$/i, "").trim();
-    if (street) return { kind: "end", street };
+    // "JOSEPHINE PL & PLYMOUTH PINES DR@MAILBOXES": the corner, with a landmark.
+    if (/\s+&\s+|\s+\band\b\s+/i.test(street)) d = street;
+    else if (street) return { kind: "end", street };
   }
   // "AIRPORT BLVD ROUNDABOUT" is that street's roundabout; a bare "ROUNDABOUT" names no street.
   const parts = d
