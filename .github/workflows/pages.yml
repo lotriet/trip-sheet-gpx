@@ -33,6 +33,8 @@ jobs:
         env:
           NEXT_PUBLIC_MAPBOX_TOKEN: ${{ secrets.MAPBOX_TOKEN }}
           NEXT_PUBLIC_GEOAPIFY_KEY: ${{ secrets.GEOAPIFY_KEY }}
+      # Open pages compare this with the build they run and reload into a new one.
+      - run: echo "{\"build\":\"$GITHUB_SHA\"}" > out/version.json
       - uses: actions/upload-pages-artifact@v3
         with:
           path: out

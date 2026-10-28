@@ -14,6 +14,8 @@ const nextConfig: NextConfig = {
   assetPrefix: basePath,
   env: {
     NEXT_PUBLIC_BASE_PATH: basePath,
+    // GitHub Actions sets this; the deploy writes the same id to version.json.
+    NEXT_PUBLIC_BUILD_ID: process.env.GITHUB_SHA ?? "dev",
   },
   turbopack: {
     rules: {

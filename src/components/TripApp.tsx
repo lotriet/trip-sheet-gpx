@@ -21,6 +21,7 @@ import { osrmRouter } from "@/lib/osrm";
 import { RETAKE_MESSAGE } from "@/lib/ocr/quality";
 import { loadDay, saveDay, type SavedRun } from "@/lib/storage";
 import { dwellsOf, recordedFixes, stopsFromRecording } from "@/lib/recording";
+import { useNewVersionReload } from "@/lib/newVersion";
 import { autoGroup, buildTrips, describePage, dropDuplicatePages, gpxFileName, mergeIntoDay, newTripKey, sheetProblems, sortStopsByTime, splitRuns, type PageInfo, type PageRead, type Trip } from "@/lib/batch";
 import { canShareFiles, sendNativeGpx, shareOrDownload, type TextFile } from "@/lib/shareFiles";
 import { buildStreetIndex, checkStop, checkStreet, looseName, sheetStyle, suggestFor as suggestNames } from "@/lib/streetCheck";
@@ -236,6 +237,7 @@ export function TripApp() {
     JSON.stringify(currentDraft.overrides) === JSON.stringify(overrides) &&
     JSON.stringify(currentDraft.warnings) === JSON.stringify(editWarnings);
   const editingRun = editingId ? runs.find((run) => run.id === editingId) : undefined;
+  useNewVersionReload(view === "day" && !draftActive && !routeBuilding && !rebuilding && !exportingDay && !checking);
   // A run opened to move its turnaround is built once its sheet and map settings are in place.
   const pendingBuild = useRef(false);
   useEffect(() => {
