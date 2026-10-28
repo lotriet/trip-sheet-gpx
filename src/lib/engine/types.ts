@@ -52,6 +52,9 @@ export type RawPlace = {
   level: string;
 };
 
+/** Where a house-number stop ("1133 BATCHELOR RD") really is, from the geocoder. */
+export type RawAddress = { stop: string; lat: number; lon: number };
+
 export type Warning = {
   level: "info" | "warn";
   stopIndex: number;

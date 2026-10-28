@@ -42,3 +42,4 @@ next-env.d.ts
 
 # local uploads (trip-sheet photos stay off the server)
 /uploads
+/.roads-download.json

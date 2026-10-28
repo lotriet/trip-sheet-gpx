@@ -1,11 +1,12 @@
 import { decodeTiles, type TileBuffer } from "./engine/tiles";
+import { cellsFor, linesFromCells, type RoadCell } from "./engine/roads";
 import { expandPlaceQuery, isPassThrough, looksLikePlace, schoolSig, titleCaseStreet } from "./engine/names";
 import { matchPlace } from "./engine/route";
 import { KNOWN_SCHOOLS, WAKE_BBOX } from "./engine/schools";
 import { classifyLocation } from "./engine/parseSheet";
-import type { LonLat, RawLine, RawPlace, Sheet } from "./engine/types";
+import type { LonLat, RawAddress, RawLine, RawPlace, Sheet } from "./engine/types";
 
-export type MapData = { lines: RawLine[]; places: RawPlace[] };
+export type MapData = { lines: RawLine[]; places: RawPlace[]; addresses?: RawAddress[] };
 
 export type Bbox = { minLon: number; minLat: number; maxLon: number; maxLat: number };
 
@@ -127,11 +128,11 @@ type MapboxFeature = {
 };
 
 /** Mapbox's street and address geocoder, answered in Photon's shape. */
-async function mapbox(query: string, bias: { lat: number; lon: number }): Promise<PhotonFeature[]> {
+async function mapbox(query: string, bias: { lat: number; lon: number }, types = "street,address"): Promise<PhotonFeature[]> {
   const url = new URL("https://api.mapbox.com/search/geocode/v6/forward");
   url.searchParams.set("q", query);
   url.searchParams.set("country", "us");
-  url.searchParams.set("types", "street,address");
+  url.searchParams.set("types", types);
   url.searchParams.set("bbox", `${WAKE_BBOX.minLon},${WAKE_BBOX.minLat},${WAKE_BBOX.maxLon},${WAKE_BBOX.maxLat}`);
   url.searchParams.set("proximity", `${bias.lon},${bias.lat}`);
   url.searchParams.set("limit", "5");
@@ -167,10 +168,10 @@ type GeoapifyFeature = {
 };
 
 /** Geoapify, for schools and as a second street geocoder. */
-async function geoapify(query: string, bias: { lat: number; lon: number }, type: "amenity" | "street"): Promise<PhotonFeature[]> {
+async function geoapify(query: string, bias: { lat: number; lon: number }, type?: "amenity" | "street"): Promise<PhotonFeature[]> {
   const url = new URL("https://api.geoapify.com/v1/geocode/search");
   url.searchParams.set("text", query);
-  url.searchParams.set("type", type);
+  if (type) url.searchParams.set("type", type);
   url.searchParams.set("filter", `rect:${WAKE_BBOX.minLon},${WAKE_BBOX.minLat},${WAKE_BBOX.maxLon},${WAKE_BBOX.maxLat}`);
   url.searchParams.set("bias", `proximity:${bias.lon},${bias.lat}`);
   url.searchParams.set("format", "geojson");
@@ -490,6 +491,69 @@ async function readTiles(area: Bbox | Tile[], onStatus?: (s: string) => void): P
   return decodeTiles(buffers);
 }
 
+function tileBox({ z, x, y }: Tile): Bbox {
+  const n = 2 ** z;
+  const lat = (row: number) => (Math.atan(Math.sinh(Math.PI * (1 - (2 * row) / n))) * 180) / Math.PI;
+  return { minLon: (x / n) * 360 - 180, maxLon: ((x + 1) / n) * 360 - 180, minLat: lat(y + 1), maxLat: lat(y) };
+}
+
+const roadCells = new Map<string, Promise<RoadCell>>();
+
+/** Reads one cell file's text, or null when the cell has no roads. */
+export type RoadReader = (name: string) => Promise<string | null>;
+
+let readRoadFile: RoadReader = async (name) => {
+  const res = await fetch(`${process.env.NEXT_PUBLIC_BASE_PATH ?? ""}/roads/${name}.json`);
+  if (res.status === 404) return null;
+  if (!res.ok) throw new Error(`Road data responded ${res.status}`);
+  return res.text();
+};
+
+/** Node (tests and build scripts) reads the cell files from disk instead. */
+export function useRoadReader(reader: RoadReader) {
+  readRoadFile = reader;
+  roadCells.clear();
+}
+
+function roadCell(name: string): Promise<RoadCell> {
+  let cell = roadCells.get(name);
+  if (!cell) {
+    cell = readRoadFile(name).then((text) => (text ? (JSON.parse(text) as RoadCell) : { ways: [], schools: [] }));
+    roadCells.set(name, cell);
+    cell.catch(() => roadCells.delete(name));
+  }
+  return cell;
+}
+
+/**
+ * The map for an area: the app's own OpenStreetMap roads inside Wake County,
+ * which join exactly at every corner, else the public map tiles.
+ */
+async function readMap(area: Bbox | Tile[], onStatus?: (s: string) => void): Promise<MapData> {
+  const boxes = Array.isArray(area) ? area.map(tileBox) : [area];
+  const names = new Set<string>();
+  let covered = boxes.length > 0;
+  for (const box of boxes) {
+    const cells = cellsFor(box);
+    if (!cells) {
+      covered = false;
+      break;
+    }
+    for (const c of cells) names.add(c);
+  }
+  if (covered) {
+    try {
+      onStatus?.("Reading the road map…");
+      const data = linesFromCells(await Promise.all([...names].map(roadCell)));
+      // No roads at all means the road files are missing, not an empty county.
+      if (data.lines.length) return data;
+    } catch {
+      /* the public tiles below still have the roads */
+    }
+  }
+  return readTiles(area, onStatus);
+}
+
 /** Tiles covering the straight-line corridor between two runs, for the deadhead drive. */
 export async function loadCorridor(a: LonLat, b: LonLat, onStatus?: (s: string) => void): Promise<MapData> {
   const box: Bbox = {
@@ -498,7 +562,7 @@ export async function loadCorridor(a: LonLat, b: LonLat, onStatus?: (s: string) 
     minLat: Math.min(a[1], b[1]) - 0.025,
     maxLat: Math.max(a[1], b[1]) + 0.025,
   };
-  return readTiles(box, onStatus);
+  return readMap(box, onStatus);
 }
 
 export async function loadMap(
@@ -542,7 +606,41 @@ export async function loadMap(
   const box = bboxFromPoints(points, 30) ?? fallback;
   const tiles = tilesForPoints(points);
   onStatus?.("Matching the printed streets…");
-  return withKnownSchools(await readTiles(tiles.length ? tiles : fallback, onStatus), box);
+  const data = withKnownSchools(await readMap(tiles.length ? tiles : fallback, onStatus), box);
+  const addresses = await houseStops(sheet, points.length ? middle(points) : bias, onStatus);
+  return addresses.length ? { ...data, addresses } : data;
+}
+
+/**
+ * Stops printed as a house ("1133 BATCHELOR RD - DOORSIDE"), looked up to the
+ * house. Only the keyed geocoders know house numbers well enough to trust.
+ */
+async function houseStops(sheet: Sheet, near: { lat: number; lon: number }, onStatus?: (s: string) => void): Promise<RawAddress[]> {
+  const out: RawAddress[] = [];
+  for (const stop of sheet.stops) {
+    if (classifyLocation(stop.description).kind !== "street") continue;
+    const house = stop.description.replace(/\s*-?\s*\(?\bdoorside\b\)?.*$/i, "").replace(/\s*-\s*$/, "").trim();
+    if (!/^\d+\s+\D/.test(house)) continue;
+    onStatus?.(`Finding ${house}…`);
+    const query = `${streetQuery(house)}, North Carolina`;
+    const asks = [
+      ...(MAPBOX_TOKEN ? [() => mapbox(query, near, "address")] : []),
+      ...(GEOAPIFY_KEY ? [() => geoapify(query, near)] : []),
+    ];
+    for (const ask of asks) {
+      try {
+        const found = (await ask()).find((f) => /^(address|building)$/.test(f.properties?.osm_value ?? "") && keepFeature(f, near, 20));
+        const at = found?.geometry?.coordinates;
+        if (at) {
+          out.push({ stop: stop.description, lon: at[0], lat: at[1] });
+          break;
+        }
+      } catch {
+        /* the stop is still placed along its street */
+      }
+    }
+  }
+  return out;
 }
 
 function middle(points: { lon: number; lat: number }[]): { lon: number; lat: number } {
@@ -595,7 +693,7 @@ export async function lookupName(raw: string, near: { lat: number; lon: number }
 export async function loadAround(point: { lat: number; lon: number }, onStatus?: (s: string) => void): Promise<MapData> {
   const d = 0.012;
   const box = { minLon: point.lon - d, maxLon: point.lon + d, minLat: point.lat - d, maxLat: point.lat + d };
-  return withKnownSchools(await readTiles(box, onStatus), box);
+  return withKnownSchools(await readMap(box, onStatus), box);
 }
 
 /** Two map areas as one. */
@@ -604,5 +702,6 @@ export function mergeMaps(a: MapData, b: MapData): MapData {
   return {
     lines: [...a.lines, ...b.lines],
     places: [...a.places, ...b.places.filter((p) => !seen.has(`${p.name}|${p.lat.toFixed(4)}|${p.lon.toFixed(4)}`))],
+    addresses: [...(a.addresses ?? []), ...(b.addresses ?? [])],
   };
 }

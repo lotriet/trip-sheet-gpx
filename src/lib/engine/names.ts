@@ -78,6 +78,8 @@ export function canonicalKey(raw: string): string {
     .replace(/\s+/g, " ")
     .trim();
   s = s.replace(/\b(highway|hwy)\b/g, " ").replace(/\s+/g, " ").trim();
+  // Signs and the map disagree on "Olde Carpenter Way" / "Old Carpenter Way".
+  s = s.replace(/\bolde\b/g, "old");
   const route = s.match(/^(nc|us|sr|i|interstate)\s*(\d+[a-z]?)$/);
   if (route) {
     const head = route[1];

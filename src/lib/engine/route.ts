@@ -17,6 +17,7 @@ import type {
   LonLat,
   ManeuverKind,
   RawLine,
+  RawAddress,
   RawPlace,
   RouteFailure,
   RouteLeg,
@@ -789,6 +790,7 @@ async function routeFrom(
   start: GraphNode,
   available: Set<string>,
   places: RawPlace[],
+  addresses: RawAddress[],
   overrides: RouteOverrides,
   router?: Router,
 ): Promise<RouteSuccess> {
@@ -1187,7 +1189,7 @@ async function routeFrom(
   }
 
   // Place stops along the finished track.
-  const placement = placeStops(sheet, coords, anchors, turnMarks, graph, available, places);
+  const placement = placeStops(sheet, coords, anchors, turnMarks, graph, available, places, addresses);
   warnings.push(...placement.warnings);
   const meters = polylineMeters(coords);
   const gpx = buildGpx(sheet, coords, placement.stops, turnMarks);
@@ -1309,6 +1311,7 @@ function placeStops(
   graph: Graph,
   available: Set<string>,
   places: RawPlace[],
+  addresses: RawAddress[],
 ): { stops: RouteSuccess["stops"]; warnings: Warning[] } {
   const out: RouteSuccess["stops"] = [];
   const warnings: Warning[] = [];
@@ -1392,6 +1395,25 @@ function placeStops(
       } else {
         warnings.push({ level: "warn", stopIndex: index, maneuverIndex: -1, message: `The route doesn't reach the mapped intersection for stop “${stop.description}”. Its marker is approximate; check it on the map.` });
       }
+    } else if (loc.kind === "street" && addresses.some((a) => a.stop === stop.description)) {
+      // A house the geocoder found: the stop is where the route passes it.
+      const house = addresses.find((a) => a.stop === stop.description)!;
+      const { from, to } = windowFor(index);
+      const hit = nearestIndex(track.slice(0, to + 1), [house.lon, house.lat], from);
+      if (hit.d <= 150) {
+        at = hit.index;
+        coord = track[at];
+        placed = true;
+        // DOORSIDE: the bus pulls up with the house on its right (door) side.
+        const a = track[Math.max(0, at - 1)];
+        const b = track[Math.min(track.length - 1, at + 1)];
+        const cross = (b[0] - a[0]) * (house.lat - a[1]) - (b[1] - a[1]) * (house.lon - a[0]);
+        if (/\bdoorside\b/i.test(stop.description) && hit.d > 8 && cross > 0) {
+          warnings.push({ level: "warn", stopIndex: index, maneuverIndex: -1, message: `Stop “${stop.description}” is on the bus's left as routed, but DOORSIDE means the door faces it. Check the direction of travel here.` });
+        }
+      } else {
+        warnings.push({ level: "warn", stopIndex: index, maneuverIndex: -1, message: `The route doesn't pass the address for stop “${stop.description}”. Its marker is approximate; check it on the map.` });
+      }
     } else if (index > 0) {
       warnings.push({ level: "warn", stopIndex: index, maneuverIndex: -1, message: `Stop “${stop.description}” gives only a street name, so its exact position along the street is unknown. Check this stop marker.` });
     }
@@ -1424,7 +1446,7 @@ function scoreRoute(r: RouteSuccess): number {
 
 export async function routeSheet(
   sheet: Sheet,
-  data: { lines: RawLine[]; places: RawPlace[] },
+  data: { lines: RawLine[]; places: RawPlace[]; addresses?: RawAddress[] },
   overrides: RouteOverrides = {},
   router?: Router,
 ): Promise<RouteResult> {
@@ -1510,7 +1532,7 @@ export async function routeSheet(
   for (const s of starts) {
     // Let the page repaint between tries, so the phone doesn't look frozen.
     await new Promise((r) => setTimeout(r, 0));
-    const r = await routeFrom(graph, sheet, s, available, data.places, overrides);
+    const r = await routeFrom(graph, sheet, s, available, data.places, data.addresses ?? [], overrides);
     if (!best || scoreRoute(r) < scoreRoute(best)) {
       best = r;
       bestStart = s;
@@ -1518,7 +1540,7 @@ export async function routeSheet(
   }
   // Where the tiles left gaps, drive them again with the road router.
   if (router && best && bestStart && best.warnings.some((w) => w.message.startsWith(JUMP_NOTE))) {
-    best = await routeFrom(graph, sheet, bestStart, available, data.places, overrides, router);
+    best = await routeFrom(graph, sheet, bestStart, available, data.places, data.addresses ?? [], overrides, router);
   }
   if (!best || best.coords.length < 2) {
     // Name the streets the map didn't have: they are almost always the reason.
