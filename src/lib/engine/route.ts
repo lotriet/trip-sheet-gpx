@@ -1112,6 +1112,20 @@ async function routeFrom(
     }
 
     const last = i === flat.length - 1;
+    // The sheet's last turn puts the bus on the street of a house stop; drive
+    // on along that street to the house.
+    const house = last ? addresses.find((a) => a.stop === sheet.stops.at(-1)?.description) : undefined;
+    if (house && currentKey && haversine(node.coord, [house.lon, house.lat]) > 60) {
+      const target = nearestOn(currentKey, [house.lon, house.lat]);
+      const leg = target && target.id !== node.id && haversine(target.coord, [house.lon, house.lat]) <= 150
+        ? travel(currentKey, { type: "node", id: target.id })
+        : null;
+      if (leg) {
+        appendLine(coords, leg.coords, 0.4);
+        node = leg.node;
+        heading = leg.heading;
+      }
+    }
     if (last && currentKey) {
       const dest = crossKey(sheet.stops[sheet.stops.length - 1]?.description ?? "", currentKey, available, places);
       if (dest && !nodeHas(node, dest)) {
