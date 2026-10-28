@@ -23,7 +23,15 @@ const planned = {
   gpx: "",
   viaStreets: [],
 } as unknown as RouteSuccess;
-const sheet = { route: "GL1473", run: "1.001", description: "TEST", stops: [] } as unknown as Sheet;
+const sheet = {
+  route: "GL1473",
+  run: "1.001",
+  description: "TEST",
+  stops: [
+    { time: "6:00 AM", description: "A ST & B ST", maneuvers: [{ kind: "left", street: "C ST" }] },
+    { time: "6:05 AM", description: "C ST & D ST", maneuvers: [] },
+  ],
+} as unknown as Sheet;
 const minuteOf = (t: number) => t / 60000;
 // The bus stands 30 s at the first stop, drives the same streets, a few meters off the map's line.
 const drive = [
@@ -34,7 +42,7 @@ const drive = [
 ];
 
 test("a recorded drive becomes the route, with the sheet's turn where the bus turned", () => {
-  const made = routeFromDrive(sheet, planned, drive, minuteOf);
+  const made = routeFromDrive(sheet, planned, drive, { minuteOf });
   assert.ok(made);
   assert.equal(made.legsDriven, 1);
   const { route } = made;
@@ -48,5 +56,5 @@ test("a recorded drive becomes the route, with the sheet's turn where the bus tu
 
 test("a drive somewhere else leaves the planned route", () => {
   const elsewhere = drive.map((f) => ({ ...f, lat: f.lat + 0.05 }));
-  assert.equal(routeFromDrive(sheet, planned, elsewhere, minuteOf), null);
+  assert.equal(routeFromDrive(sheet, planned, elsewhere, { minuteOf }), null);
 });
