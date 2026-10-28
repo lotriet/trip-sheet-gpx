@@ -28,6 +28,8 @@ export type SavedRun = {
   turnarounds?: Record<string, { lat: number; lon: number }>;
   /** Where the bus really stops, from a recorded drive, by stop index. Old saved runs omit this. */
   stopPins?: Record<number, { lat: number; lon: number; description: string }>;
+  /** The track is the road driven on a recording, with the sheet's stops and turns on it. */
+  driven?: boolean;
 };
 
 function openDb(): Promise<IDBDatabase> {

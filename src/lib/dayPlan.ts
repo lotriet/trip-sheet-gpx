@@ -19,6 +19,8 @@ export type DayRunTrack = {
   stops: DayStop[];
   /** The run's own GPX. Its stop directions and turn points are carried into the day file. */
   gpx?: string;
+  /** The track is a recorded drive, not planned from the sheet. */
+  driven?: boolean;
 };
 
 type DayPoint = { point: LonLat; turn?: string };
@@ -101,7 +103,9 @@ export function runFileName(index: number, run: Pick<DayRunTrack, "run" | "descr
  * drive between the end of one and the start of the next. No route element.
  */
 export function buildDayGpx(runs: DayRunTrack[], deadheads: DeadheadLeg[]): string {
-  const title = runs.map((r) => r.run || r.route).filter(Boolean).join(", ") || "School bus day";
+  const runList = runs.map((r) => r.run || r.route).filter(Boolean).join(", ") || "School bus day";
+  // A different name keeps a driven day beside the planned one in GPX Nav instead of replacing it.
+  const title = runs.some((r) => r.driven) ? `${runList} · recorded drive` : runList;
   const lines: string[] = [
     `<?xml version="1.0" encoding="UTF-8"?>`,
     `<gpx version="1.1" creator="Trip Sheet GPX" xmlns="http://www.topografix.com/GPX/1/1">`,

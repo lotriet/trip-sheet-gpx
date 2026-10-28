@@ -22,6 +22,7 @@ import { RETAKE_MESSAGE } from "@/lib/ocr/quality";
 import { loadDay, saveDay, type SavedRun } from "@/lib/storage";
 import { dwellsOf, recordedFixes, stopsFromRecording } from "@/lib/recording";
 import { useNewVersionReload } from "@/lib/newVersion";
+import { routeFromDrive } from "@/lib/driven";
 import { autoGroup, buildTrips, describePage, dropDuplicatePages, gpxFileName, mergeIntoDay, newTripKey, sheetProblems, sortStopsByTime, splitRuns, type PageInfo, type PageRead, type Trip } from "@/lib/batch";
 import { canShareFiles, sendNativeGpx, shareOrDownload, type TextFile } from "@/lib/shareFiles";
 import { buildStreetIndex, checkStop, checkStreet, looseName, sheetStyle, suggestFor as suggestNames } from "@/lib/streetCheck";
@@ -1346,9 +1347,10 @@ export function TripApp() {
    * Route every saved run again with the current app, from its own sheet and
    * with the driver's turnarounds and via taps. Protected runs keep their GPX.
    */
-  async function rebuildAllRuns(recordings?: string[]) {
+  async function rebuildAllRuns(recordings?: string[], fromDrive = false) {
     if (exportLock.current || rebuilding || !runs.length) return;
-    const todo = runs.filter((run) => !run.locked);
+    // A run made from a recorded drive keeps it; only a new drive replaces it.
+    const todo = runs.filter((run) => !run.locked && (fromDrive || !run.driven));
     if (!todo.length) {
       setError("Every run is protected. Unlock a run to rebuild it.");
       return;
@@ -1362,9 +1364,11 @@ export function TripApp() {
       setError("That file has no timed track points, so there is nothing to match. Pick a GPX recorded on the drive.");
       return;
     }
+    const fixes = fromDrive && recordings ? recordings.flatMap((gpx) => recordedFixes(gpx)).sort((a, b) => a.t - b.t) : [];
     const rebuilt = new Map<string, SavedRun>();
     let failed = 0;
     let moved = 0;
+    let drivenRuns = 0;
     try {
       for (const [i, run] of todo.entries()) {
         const prefix = `Rebuilding ${i + 1} of ${todo.length}`;
@@ -1388,7 +1392,9 @@ export function TripApp() {
           const result = await routeSheet(parsed, data, overrides, osrmRouter);
           if (!result.ok) throw new Error(result.error);
           const vias = (run.vias ?? []).map((v, n) => ({ ...v, ...(result.viaStreets[n] ? { street: result.viaStreets[n] } : {}) }));
-          rebuilt.set(run.id, { ...savedRunFrom(run.id, run.sheetText, parsed, result, vias, false, run.turnarounds, stopPins), area: runArea });
+          const drive = fromDrive ? routeFromDrive(parsed, result, fixes) : null;
+          if (drive) drivenRuns++;
+          rebuilt.set(run.id, { ...savedRunFrom(run.id, run.sheetText, parsed, drive?.route ?? result, vias, false, run.turnarounds, stopPins), area: runArea, driven: !!drive });
         } catch {
           failed++;
         }
@@ -1398,14 +1404,17 @@ export function TripApp() {
       setRebuilding(false);
     }
     if (rebuilt.size) setRuns((prev) => prev.map((run) => rebuilt.get(run.id) ?? run));
-    if (recordings) setNotice(moved ? `Moved ${moved} stop${moved > 1 ? "s" : ""} to where the bus stopped on the recorded drive.` : "No stop with a warning matched a stop on the recorded drive. Check that the recording is from these runs.");
+    if (fromDrive) setNotice(drivenRuns
+      ? `${drivenRuns} run${drivenRuns > 1 ? "s" : ""} now follow${drivenRuns > 1 ? "" : "s"} the recorded drive.${todo.length - drivenRuns - failed > 0 ? ` ${todo.length - drivenRuns - failed} weren't on the recording and kept the sheet's route.` : ""}`
+      : "None of the runs are on that recording. Check that it's from these runs.");
+    else if (recordings) setNotice(moved ? `Moved ${moved} stop${moved > 1 ? "s" : ""} to where the bus stopped on the recorded drive.` : "No stop with a warning matched a stop on the recorded drive. Check that the recording is from these runs.");
     if (failed) setError(`${failed} run${failed > 1 ? "s" : ""} couldn't be rebuilt and kept ${failed > 1 ? "their" : "its"} old route. Open ${failed > 1 ? "them" : "it"} with Edit.`);
   }
 
-  async function matchRecordings(files: FileList | null) {
+  async function matchRecordings(files: FileList | null, fromDrive = false) {
     if (!files?.length) return;
     const texts = await Promise.all([...files].map((f) => f.text()));
-    await rebuildAllRuns(texts);
+    await rebuildAllRuns(texts, fromDrive);
   }
 
   /** Clear the day's list. Protected runs stay; remove those one at a time. */
@@ -1709,6 +1718,7 @@ export function TripApp() {
                   <div className="flex flex-wrap items-center gap-1.5">
                     <h2 className="text-lg font-bold leading-tight tracking-tight">{run.route || "Route"} {run.run && <span className="font-semibold text-[#53627a]">{run.run}</span>}</h2>
                     {run.locked && <span className="rounded-full bg-[#e7f3eb] px-2 py-0.5 text-[0.68rem] font-bold text-[#216338]">Protected</span>}
+                    {run.driven && <span className="rounded-full bg-[#fdf0dc] px-2 py-0.5 text-[0.68rem] font-bold text-[#8a5a12]">Recorded drive</span>}
                     {(!warnings.length || run.warningsAcknowledged) && <span className="rounded-full bg-[#e7f3eb] px-2 py-0.5 text-[0.68rem] font-bold text-[#216338]">Ready</span>}
                   </div>
                   <p className="mt-0.5 truncate text-sm font-medium text-[#46546a]">{run.description || "Untitled sheet"}</p>
@@ -1823,7 +1833,11 @@ export function TripApp() {
                 Match stops to a recorded drive
                 <input type="file" accept=".gpx,application/gpx+xml,application/xml,text/xml" multiple className="sr-only" disabled={exportingDay || rebuilding} onChange={(e) => { void matchRecordings(e.currentTarget.files); e.currentTarget.value = ""; }} />
               </label>
-              <p className="text-center text-xs text-[#68758a]">Saved runs keep the route they were built with. Rebuild after an app update. A GPX recorded on the drive moves stops with warnings to where the bus stopped.</p>
+              <label className={`inline-flex h-9 cursor-pointer items-center rounded-md border border-[#c9d6ea] bg-white px-3 text-xs font-semibold text-[#173b64] ${exportingDay || rebuilding ? "pointer-events-none opacity-50" : ""}`}>
+                Use a recorded drive as the route
+                <input type="file" accept=".gpx,application/gpx+xml,application/xml,text/xml" multiple className="sr-only" disabled={exportingDay || rebuilding} onChange={(e) => { void matchRecordings(e.currentTarget.files, true); e.currentTarget.value = ""; }} />
+              </label>
+              <p className="text-center text-xs text-[#68758a]">Saved runs keep the route they were built with. Rebuild after an app update. A GPX recorded on the drive moves stops with warnings to where the bus stopped, or becomes the route itself: the road you drove, with the sheet&apos;s stops and turns on it. Recorded-drive runs send as their own day in GPX Nav.</p>
               {notice && <p className="text-center text-sm font-medium text-[#216338]">{notice}</p>}
             </div>
           )}
