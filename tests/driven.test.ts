@@ -58,3 +58,25 @@ test("a drive somewhere else leaves the planned route", () => {
   const elsewhere = drive.map((f) => ({ ...f, lat: f.lat + 0.05 }));
   assert.equal(routeFromDrive(sheet, planned, elsewhere, { minuteOf }), null);
 });
+
+// The map under the drive: A Street east, then C Street north from the corner.
+const lines = [
+  { name: "A Street", keys: ["a st"], coords: east, kind: "named", oneway: 0 },
+  { name: "C Street", keys: ["c st"], coords: [corner, ...north], kind: "named", oneway: 0 },
+] as const;
+
+test("a stretch the sheet gives no directions for takes its turns from the map", () => {
+  const bare = { ...sheet, stops: sheet.stops.map((s) => ({ ...s, maneuvers: [] })) } as unknown as Sheet;
+  const unmarked = { ...planned, turnMarks: [] } as unknown as RouteSuccess;
+  const made = routeFromDrive(bare, unmarked, drive, { minuteOf, lines: lines.map((l) => ({ ...l, keys: [...l.keys], coords: [...l.coords] })) });
+  assert.ok(made);
+  assert.deepEqual(made.route.turnMarks.map((t) => [t.kind, t.street]), [["left", "C St"]]);
+  assert.match(made.route.gpx, /<name>Left on C St<\/name>/);
+});
+
+test("a turn the sheet already names is not cued twice from the map", () => {
+  const made = routeFromDrive(sheet, planned, drive, { minuteOf, lines: lines.map((l) => ({ ...l, keys: [...l.keys], coords: [...l.coords] })) });
+  assert.ok(made);
+  assert.equal(made.route.turnMarks.length, 1);
+  assert.equal(made.route.turnMarks[0].street, "C ST");
+});
