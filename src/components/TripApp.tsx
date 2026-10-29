@@ -2776,7 +2776,7 @@ function routeTurnPins(route: RouteSuccess): TurnPin[] {
   return route.turnMarks.flatMap((mark) => {
     const point = route.coords[mark.trackIndex];
     if (!point || mark.kind === "turnaround") return [];
-    return [{ lat: point[1], lon: point[0], label: maneuverPhrase(mark.kind, mark.street), kind: mark.kind, confirmed: mark.confirmed }];
+    return [{ lat: point[1], lon: point[0], label: maneuverPhrase(mark.kind, mark.street, mark.via), kind: mark.kind, confirmed: mark.confirmed }];
   });
 }
 

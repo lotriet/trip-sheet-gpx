@@ -1,6 +1,7 @@
 import { minutesOf } from "./batch";
 import { bearing, haversine, minDistToLine, polylineMeters, turnAngle } from "./engine/geo";
 import { buildGpx } from "./engine/gpx";
+import { isPassThrough } from "./engine/names";
 import { resolveTarget } from "./engine/route";
 import type { LonLat, PlacedStop, RawLine, RawPlace, RouteSuccess, Sheet, TurnMark, Warning } from "./engine/types";
 import type { Fix } from "./recording";
@@ -262,6 +263,9 @@ function streetAt(grid: ReturnType<typeof segmentGrid>, p: LonLat): MapStreet | 
   return best?.street ?? null;
 }
 
+/** An interstate, US route or freeway: roads you get on and off by ramp. */
+const isHighway = (street: MapStreet | null) => !!street && street.keys.some((k) => /^(i|us) \d+/.test(k) || /\b(freeway|expressway)\b/.test(k));
+
 /** One road under two map names: the Dan K. Moore Freeway is I-40. */
 const sameRoad = (a: MapStreet, b: MapStreet) => a.keys.some((k) => b.keys.includes(k));
 
@@ -271,8 +275,7 @@ const sameRoad = (a: MapStreet, b: MapStreet) => a.keys.some((k) => b.keys.inclu
  * back to where it parked) still needs. A street counts once the drive stays
  * on it for a while, so GPS drift past a side street is not a turn.
  */
-function mapTurns(track: LonLat[], grid: ReturnType<typeof segmentGrid>): { k: number; kind: "left" | "right" | "proceed"; street: string }[] {
-  const under = track.map((p) => streetAt(grid, p));
+function mapTurns(track: LonLat[], under: (MapStreet | null)[]): { k: number; kind: "left" | "right" | "proceed"; street: string }[] {
   const holds = (k: number, street: MapStreet) => {
     let along = 0;
     for (let j = k + 1; j < track.length && along < ALONG_STREET_M; j++) {
@@ -429,7 +432,11 @@ export function routeFromDrive(sheet: Sheet, planned: RouteSuccess, fixesIn: Fix
     const b = stops[i + 1].trackIndex;
     const plannedMarks = marksIn(a, b, false);
     let from = 0;
+    let roundabout = false;
     (sheetStop?.maneuvers ?? []).forEach((m, maneuverIndex) => {
+      // "Right Turn Onto ROUNDABOUT, Left Turn On ROUNDABOUT, Right Turn Onto X": the right is the exit.
+      const exitsRoundabout = roundabout && (m.kind === "left" || m.kind === "right");
+      roundabout = isPassThrough(m.street) ? /round|circle|rotary/i.test(m.street) : false;
       // Where the planned route turns, when the drive turns there too: the exact corner.
       let k = -1;
       const mark = plannedMarks.find((t) => t.maneuverIndex === maneuverIndex);
@@ -451,7 +458,15 @@ export function routeFromDrive(sheet: Sheet, planned: RouteSuccess, fixesIn: Fix
         return;
       }
       from = k;
-      turnMarks.push({ stopIndex: stops[i].index, maneuverIndex, kind: m.kind, street: m.street, trackIndex: offset + k, confirmed: true });
+      turnMarks.push({
+        stopIndex: stops[i].index,
+        maneuverIndex,
+        kind: m.kind,
+        street: m.street,
+        trackIndex: offset + k,
+        confirmed: true,
+        ...(exitsRoundabout || mark?.via === "roundabout" ? { via: "roundabout" as const } : {}),
+      });
     });
   };
 
@@ -497,9 +512,11 @@ export function routeFromDrive(sheet: Sheet, planned: RouteSuccess, fixesIn: Fix
   if (options.lines) {
     const along = [0];
     for (let k = 1; k < coords.length; k++) along.push(along[k - 1] + haversine(coords[k - 1], coords[k]));
+    const grid = segmentGrid(options.lines);
+    const under = coords.map((p) => streetAt(grid, p));
     const sheetMarks = [...turnMarks];
     const plain = (street: string) => street.toLowerCase().replace(/[^a-z0-9]/g, "").replace(/(hwy|highway)$/, "");
-    for (const turn of mapTurns(coords, segmentGrid(options.lines))) {
+    for (const turn of mapTurns(coords, under)) {
       if (keepPlanned.some(([a, b]) => turn.k >= a && turn.k <= b)) continue;
       const here = along[turn.k];
       // The sheet names this street close by: one cue, where the drive really got onto it.
@@ -517,6 +534,46 @@ export function routeFromDrive(sheet: Sheet, planned: RouteSuccess, fixesIn: Fix
       }
       if (sheetMarks.some((t) => Math.abs(along[t.trackIndex] - here) < 120)) continue;
       turnMarks.push({ stopIndex: -1, maneuverIndex: -1, kind: turn.kind, street: turn.street, trackIndex: turn.k, confirmed: true });
+    }
+
+    // Two cues onto the same street a few meters apart (a left onto it, then
+    // a roundabout's exit back onto it): the later one is how the bus leaves.
+    turnMarks.sort((x, y) => x.trackIndex - y.trackIndex);
+    for (let n = turnMarks.length - 2; n >= 0; n--) {
+      const a = turnMarks[n];
+      const b = turnMarks[n + 1];
+      if (plain(a.street) === plain(b.street) && along[b.trackIndex] - along[a.trackIndex] < 40) turnMarks.splice(n, 1);
+    }
+
+    // On and off a highway: the map has no ramps, so a ramp is where the
+    // drive leaves a named road for no road at all. The cue goes where the
+    // ramp starts, on the side it leaves, not where it joins the next road.
+    const sideAt = (s: number, k: number): "left" | "right" | "proceed" => {
+      let b = s;
+      while (b > 0 && along[s] - along[b] < 80) b--;
+      let f = s;
+      while (f < k && along[f] - along[s] < 120) f++;
+      const angle = turnAngle(bearing(coords[b], coords[s]), bearing(coords[s], coords[f]));
+      return angle > 4 ? "right" : angle < -4 ? "left" : "proceed";
+    };
+    for (const mark of [...turnMarks]) {
+      const k = mark.trackIndex;
+      if (mark.via || keepPlanned.some(([a, b]) => k >= a && k <= b)) continue;
+      let j = k - 1;
+      while (j > 0 && !under[j]) j--;
+      const start = j + 1;
+      if (start >= k || along[k] - along[start] < 80) continue;
+      const before = under[j];
+      const after = under[k];
+      if (!(isHighway(before) || isHighway(after)) || (before && after && sameRoad(before, after))) continue;
+      const side = sideAt(start, k);
+      if (mark.kind === "proceed") {
+        // Merging on, or an exit that becomes the next road: one cue, at the ramp.
+        Object.assign(mark, { trackIndex: start, kind: side, via: "ramp" as const });
+      } else if (!turnMarks.some((t) => Math.abs(along[t.trackIndex] - along[start]) < 30)) {
+        // An exit ending at a light: take the ramp here, then the turn at its end.
+        turnMarks.push({ stopIndex: mark.stopIndex, maneuverIndex: -1, kind: side, street: mark.street, trackIndex: start, confirmed: true, via: "ramp" });
+      }
     }
   }
 
