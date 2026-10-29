@@ -55,6 +55,9 @@ function stopsOnDrive(stops: PlacedStop[], fixes: Fix[], minuteOf: (t: number) =
   // Where the bus stood longest near the stop is where it picked up; at a
   // school that's the loading, not a red light on the way out.
   const stoodScore = (k: number, school: boolean) => Math.min(school ? 900 : 60, standing(fixes, k)) / 10;
+  // A school's pin can sit hundreds of meters from where buses load, so
+  // there the standstill decides, not how close the bus came to the pin.
+  const farScore = (m: number, school: boolean) => m / (school ? 40 : 10);
   for (const [i, stop] of stops.entries()) {
     const minute = minutesOf(stop.time);
     const school = isSchool(stop.description);
@@ -67,7 +70,7 @@ function stopsOnDrive(stops: PlacedStop[], fixes: Fix[], minuteOf: (t: number) =
       if (late > (delay == null ? 45 : 15)) continue;
       const m = haversine([stop.lon, stop.lat], point(f));
       if (m > radius) continue;
-      const score: number = m / 10 + late - stoodScore(k, school);
+      const score: number = farScore(m, school) + late - stoodScore(k, school);
       if (!best || score < best.score) best = { k, score };
     }
     if (!best) {
@@ -94,7 +97,7 @@ function stopsOnDrive(stops: PlacedStop[], fixes: Fix[], minuteOf: (t: number) =
       if (Math.abs(minuteOf(f.t) - minute - late) > 10 || at.includes(j)) return;
       const m = haversine([stop.lon, stop.lat], point(f));
       if (m > (school ? SCHOOL_M : STOP_M)) return;
-      const score = m / 10 - stoodScore(j, school);
+      const score = farScore(m, school) - stoodScore(j, school);
       if (!best || score < best.score) best = { k: j, score };
     });
     if (best) at[i] = pullsAway(fixes, (best as { k: number }).k);
