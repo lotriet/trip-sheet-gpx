@@ -52,7 +52,9 @@ export function prettySheetText(s: string): string {
     .join(" ");
 }
 
-export function maneuverPhrase(kind: string, street: string): string {
+export function maneuverPhrase(kind: string, street: string, via?: "roundabout" | "ramp"): string {
+  // "Roundabout, right on White Oak Church Rd": a follower draws the roundabout; others read it as is.
+  if (via) return `${via === "roundabout" ? "Roundabout" : "Ramp"}, ${maneuverPhrase(kind, street).replace(/^\w/, (c) => c.toLowerCase())}`;
   const name = prettySheetText(street);
   if (kind === "proceed") return `Proceed on ${name}`;
   if (kind === "left") return `Left on ${name}`;
@@ -70,11 +72,11 @@ export const TURN_UNCONFIRMED_TYPE = "turn-unconfirmed";
  * follower knows exactly where on the track the turn is. GPX apps that do not
  * read point names ignore it.
  */
-export function trackPointXml(point: LonLat, turn?: Pick<TurnMark, "kind" | "street" | "confirmed">): string {
+export function trackPointXml(point: LonLat, turn?: Pick<TurnMark, "kind" | "street" | "confirmed" | "via">): string {
   const attrs = `lat="${point[1].toFixed(6)}" lon="${point[0].toFixed(6)}"`;
   if (!turn) return `<trkpt ${attrs}/>`;
   const type = turn.confirmed ? TURN_TYPE : TURN_UNCONFIRMED_TYPE;
-  return `<trkpt ${attrs}><name>${esc(maneuverPhrase(turn.kind, turn.street))}</name><type>${type}</type></trkpt>`;
+  return `<trkpt ${attrs}><name>${esc(maneuverPhrase(turn.kind, turn.street, turn.via))}</name><type>${type}</type></trkpt>`;
 }
 
 export function buildGpx(sheet: Sheet, track: LonLat[], stops: PlacedStop[], turns: TurnMark[] = []): string {

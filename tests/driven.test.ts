@@ -80,3 +80,12 @@ test("a turn the sheet already names is not cued twice from the map", () => {
   assert.equal(made.route.turnMarks.length, 1);
   assert.equal(made.route.turnMarks[0].street, "C ST");
 });
+
+test("roundabout exits and ramps are named so a follower can draw them", async () => {
+  const { maneuverPhrase } = await import("../src/lib/engine/gpx");
+  const { turnPinsFromGpx } = await import("../src/lib/dayPlan");
+  assert.equal(maneuverPhrase("right", "WHITE OAK CHURCH RD", "roundabout"), "Roundabout, right on White Oak Church Rd");
+  assert.equal(maneuverPhrase("proceed", "I - 40", "ramp"), "Ramp, proceed on I - 40");
+  const pins = turnPinsFromGpx('<trkpt lat="35.8" lon="-78.8"><name>Ramp, right on Wade Ave</name><type>turn</type></trkpt>');
+  assert.equal(pins[0].kind, "right");
+});

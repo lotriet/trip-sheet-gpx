@@ -33,7 +33,8 @@ export function turnPinsFromGpx(gpx: string): TurnPin[] {
   const pins: TurnPin[] = [];
   for (const m of gpx.matchAll(/<trkpt lat="([^"]+)" lon="([^"]+)"><name>([^<]*)<\/name><type>(turn(?:-unconfirmed)?)<\/type><\/trkpt>/g)) {
     const label = m[3].replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"');
-    const kind = /^left\b/i.test(label) ? "left" : /^right\b/i.test(label) ? "right" : /^proceed\b/i.test(label) ? "proceed" : "turnaround";
+    const move = label.replace(/^(?:roundabout|ramp),\s*/i, "");
+    const kind = /^left\b/i.test(move) ? "left" : /^right\b/i.test(move) ? "right" : /^proceed\b/i.test(move) ? "proceed" : "turnaround";
     pins.push({ lat: Number(m[1]), lon: Number(m[2]), label, kind, confirmed: m[4] === "turn" });
   }
   return pins;

@@ -122,6 +122,8 @@ export type TurnMark = {
   trackIndex: number;
   /** False when the router used the closest connection or a guessed turnaround spot. */
   confirmed: boolean;
+  /** Leaving a roundabout, or taking a ramp on or off a highway. */
+  via?: "roundabout" | "ramp";
 };
 
 export type RouteSuccess = {

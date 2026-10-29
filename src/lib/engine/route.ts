@@ -941,6 +941,8 @@ async function routeFrom(
   };
 
   let inRoundabout = false;
+  // A ramp's next left or right is a real turn at its end; a roundabout's is the exit.
+  let passedRoundabout = false;
   /**
    * "Proceed Onto I - 40": the street map has the highway, but not how its
    * ramps join the roads around it. Let the road router drive from here to
@@ -1014,6 +1016,7 @@ async function routeFrom(
       // line names the road to leave on, so there is nothing called that to find.
       legs.push({ stopIndex, maneuverIndex, kind: maneuver.kind as ManeuverKind, street: maneuver.street, meters: 0 });
       inRoundabout = true;
+      passedRoundabout = /round|circle|rotary/i.test(maneuver.street);
       continue;
     }
     // Leaving a roundabout or ramp, the sheet's left or right says which way the
@@ -1131,6 +1134,7 @@ async function routeFrom(
           street: maneuver.street,
           trackIndex: joinAt,
           confirmed: true,
+          ...(passedRoundabout ? { via: "roundabout" as const } : {}),
         });
       }
     } else {
