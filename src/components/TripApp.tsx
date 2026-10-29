@@ -1397,7 +1397,15 @@ export function TripApp() {
             // Name where the bus set off from and parked, such as the school it waits at.
             const nameOf = async (p?: LonLat) => (p ? placeNear((await loadAround({ lat: p[1], lon: p[0] }).catch(() => ({ places: [] }))).places, p) : undefined);
             const [startName, endName] = await Promise.all([nameOf(drive.start), nameOf(drive.end)]);
-            drive = routeFromDrive(parsed, result, fixes, { lines: data.lines, places: data.places, startName, endName }) ?? drive;
+            // The drive there can leave the run's map; its turns come from the map along it.
+            const stopAt = (s?: { lon: number; lat: number }): LonLat | null => (s ? [s.lon, s.lat] : null);
+            const first = stopAt(drive.route.stops[1]);
+            const last = stopAt(drive.route.stops.at(-2));
+            let lines = data.lines;
+            for (const [a, b] of [[drive.start, first], [last, drive.end]] as const) {
+              if (a && b) lines = mergeMaps({ lines, places: [] }, await loadCorridor(a, b).catch(() => ({ lines: [], places: [] }))).lines;
+            }
+            drive = routeFromDrive(parsed, result, fixes, { lines, places: data.places, startName, endName }) ?? drive;
           }
           if (drive) drivenRuns++;
           rebuilt.set(run.id, { ...savedRunFrom(run.id, run.sheetText, parsed, drive?.route ?? result, vias, false, run.turnarounds, stopPins), area: runArea, driven: !!drive });

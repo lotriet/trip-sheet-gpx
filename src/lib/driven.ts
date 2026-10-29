@@ -210,6 +210,110 @@ function joinsStreet(track: LonLat[], from: number, street: StreetLines): number
   return -1;
 }
 
+const GRID = 0.002;
+
+type MapStreet = { keys: string[]; label: string };
+
+/** How a sheet would print a map street: I-40 for the interstate, Wade Ave for its expressway. */
+function streetLabel(line: RawLine): string {
+  const ref = line.keys.find((k) => /^i \d+$/.test(k)) ?? line.keys.find((k) => /^us \d+$/.test(k));
+  if (ref) return ref.replace(/^(i|us) (\d+)$/, (_, kind: string, n: string) => `${kind.toUpperCase()}-${n}`);
+  const street =
+    line.keys.find((k) => /\b(rd|st|ave|dr|ln|blvd|pkwy|hwy|ct|cir|pl|trl|ter|way|loop|run|xing|pass)$/.test(k) && !/^(state road|nc \d{4})/.test(k)) ??
+    line.keys[0];
+  if (!street) return line.name;
+  return street
+    .split(" ")
+    .map((w) => (/^(n|s|e|w|nw|ne|sw|se|nc|us)$/.test(w) ? w.toUpperCase() : w.charAt(0).toUpperCase() + w.slice(1)))
+    .join(" ");
+}
+
+/** The map's named streets cut into segments on a grid, to find the street under a point fast. */
+function segmentGrid(lines: RawLine[]) {
+  const grid = new Map<string, { street: MapStreet; a: LonLat; b: LonLat }[]>();
+  for (const line of lines) {
+    if (line.kind !== "named" || !line.keys.length) continue;
+    const street = { keys: line.keys, label: streetLabel(line) };
+    for (let i = 1; i < line.coords.length; i++) {
+      const a = line.coords[i - 1];
+      const b = line.coords[i];
+      for (let x = Math.floor(Math.min(a[0], b[0]) / GRID); x <= Math.floor(Math.max(a[0], b[0]) / GRID); x++)
+        for (let y = Math.floor(Math.min(a[1], b[1]) / GRID); y <= Math.floor(Math.max(a[1], b[1]) / GRID); y++) {
+          const key = `${x},${y}`;
+          const cell = grid.get(key);
+          if (cell) cell.push({ street, a, b });
+          else grid.set(key, [{ street, a, b }]);
+        }
+    }
+  }
+  return grid;
+}
+
+function streetAt(grid: ReturnType<typeof segmentGrid>, p: LonLat): MapStreet | null {
+  let best: { street: MapStreet; d: number } | null = null;
+  const x = Math.floor(p[0] / GRID);
+  const y = Math.floor(p[1] / GRID);
+  for (let dx = -1; dx <= 1; dx++)
+    for (let dy = -1; dy <= 1; dy++)
+      for (const s of grid.get(`${x + dx},${y + dy}`) ?? []) {
+        const d = minDistToLine(p, [s.a, s.b]).d;
+        if (d <= ON_STREET_M && (!best || d < best.d)) best = { street: s.street, d };
+      }
+  return best?.street ?? null;
+}
+
+/** One road under two map names: the Dan K. Moore Freeway is I-40. */
+const sameRoad = (a: MapStreet, b: MapStreet) => a.keys.some((k) => b.keys.includes(k));
+
+/**
+ * Where the drive moves onto another named street, by the map: the turns a
+ * stretch the sheet gives no directions for (from where the bus set off, or
+ * back to where it parked) still needs. A street counts once the drive stays
+ * on it for a while, so GPS drift past a side street is not a turn.
+ */
+function mapTurns(track: LonLat[], grid: ReturnType<typeof segmentGrid>): { k: number; kind: "left" | "right" | "proceed"; street: string }[] {
+  const under = track.map((p) => streetAt(grid, p));
+  const holds = (k: number, street: MapStreet) => {
+    let along = 0;
+    for (let j = k + 1; j < track.length && along < ALONG_STREET_M; j++) {
+      along += haversine(track[j - 1], track[j]);
+      const there = under[j];
+      if (there && !sameRoad(there, street)) return false;
+    }
+    return along >= ALONG_STREET_M;
+  };
+  const back = (k: number) => {
+    for (let j = k - 1; j >= 0; j--) if (haversine(track[j], track[k]) >= 40) return j;
+    return 0;
+  };
+  const ahead = (k: number) => {
+    for (let j = k + 1; j < track.length; j++) if (haversine(track[j], track[k]) >= 40) return j;
+    return track.length - 1;
+  };
+  const out: { k: number; kind: "left" | "right" | "proceed"; street: string; from: MapStreet | null }[] = [];
+  let on: MapStreet | null = null;
+  for (let k = 0; k < track.length; k++) {
+    const street = under[k];
+    if (!street || (on && sameRoad(on, street)) || !holds(k, street)) continue;
+    // Out of the school lot (no named street) onto the first road is a turn too.
+    const outOfLot = !on && !under[0] && haversine(track[0], track[k]) >= 30;
+    if (on || outOfLot) {
+      const angle = turnAngle(bearing(track[back(k)], track[k]), bearing(track[k], track[ahead(k)]));
+      const kind = Math.abs(angle) < 35 ? "proceed" : angle > 0 ? "right" : "left";
+      // Drifting onto a road beside the highway and back is no turn at all.
+      const prior = out.at(-1);
+      if (prior && prior.kind === "proceed" && kind === "proceed" && prior.from && sameRoad(street, prior.from)) {
+        out.pop();
+        on = street;
+        continue;
+      }
+      out.push({ k, kind, street: street.label, from: on });
+    }
+    on = street;
+  }
+  return out.map(({ k, kind, street }) => ({ k, kind, street }));
+}
+
 /** The named place (a school, a bus lot) the bus started or parked at. */
 export function placeNear(places: RawPlace[], p: LonLat, maxM = 400): string | undefined {
   let best: { name: string; score: number } | undefined;
@@ -387,6 +491,34 @@ export function routeFromDrive(sheet: Sheet, planned: RouteSuccess, fixesIn: Fix
   }
   const lastAt = stops[legs].trackIndex;
   if (!ownEnd && lastAt < planned.coords.length - 1) plannedPart(lastAt, planned.coords.length - 1, true);
+
+  // Where the drive changes street with no sheet direction near: from where
+  // the bus set off, back to where it parked, or a way the sheet doesn't print.
+  if (options.lines) {
+    const along = [0];
+    for (let k = 1; k < coords.length; k++) along.push(along[k - 1] + haversine(coords[k - 1], coords[k]));
+    const sheetMarks = [...turnMarks];
+    const plain = (street: string) => street.toLowerCase().replace(/[^a-z0-9]/g, "").replace(/(hwy|highway)$/, "");
+    for (const turn of mapTurns(coords, segmentGrid(options.lines))) {
+      if (keepPlanned.some(([a, b]) => turn.k >= a && turn.k <= b)) continue;
+      const here = along[turn.k];
+      // The sheet names this street close by: one cue, where the drive really got onto it.
+      const same = sheetMarks.find((t) => plain(t.street) === plain(turn.street) && Math.abs(along[t.trackIndex] - here) < 1000);
+      if (same) {
+        // Matched farther on, the sheet's turn is where the bus already drove along that street.
+        if (along[same.trackIndex] - here > 120 && !sheetMarks.some((t) => t !== same && t.trackIndex > turn.k && t.trackIndex < same.trackIndex)) {
+          same.trackIndex = turn.k;
+          if (same.kind !== "turnaround") same.kind = turn.kind;
+        } else if (same.kind === "proceed" && turn.kind !== "proceed") {
+          // "Proceed onto" where the drive plainly turned: say which way.
+          same.kind = turn.kind;
+        }
+        continue;
+      }
+      if (sheetMarks.some((t) => Math.abs(along[t.trackIndex] - here) < 120)) continue;
+      turnMarks.push({ stopIndex: -1, maneuverIndex: -1, kind: turn.kind, street: turn.street, trackIndex: turn.k, confirmed: true });
+    }
+  }
 
   // Warnings about a leg or stop the drive replaced no longer apply.
   const onPlanned = (p: LonLat) => keepPlanned.some(([a, b]) => coords.slice(a, b + 1).some((c) => haversine(c, p) < 60));
