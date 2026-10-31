@@ -89,3 +89,33 @@ test("roundabout exits and ramps are named so a follower can draw them", async (
   const pins = turnPinsFromGpx('<trkpt lat="35.8" lon="-78.8"><name>Ramp, right on Wade Ave</name><type>turn</type></trkpt>');
   assert.equal(pins[0].kind, "right");
 });
+
+test("a leg driven another way than the sheet's printed turn follows the trip sheet", () => {
+  // Planned: east, left up C Street, on up D Street to the stop.
+  const dStreet: LonLat[] = [[-78.79, 35.811], [-78.79, 35.812]];
+  const plannedD = {
+    ...planned,
+    coords: [...east, ...north, ...dStreet],
+    stops: [planned.stops[0], { ...planned.stops[1], lat: 35.812, trackIndex: 12 }],
+  } as unknown as RouteSuccess;
+  const sheetD = {
+    ...sheet,
+    stops: [{ ...sheet.stops[0], maneuvers: [{ kind: "left", street: "C ST" }, { kind: "proceed", street: "D ST" }] }, sheet.stops[1]],
+  } as unknown as Sheet;
+  const mapD = [...lines, { name: "D Street", keys: ["d st"], coords: [north[4], ...dStreet], kind: "named" as const, oneway: 0 as const }];
+  // The bus went on past C Street, up a street one block east, and across.
+  const around = [
+    { lat: 35.8, lon: -78.8, t: 360 * 60000 },
+    { lat: 35.8, lon: -78.8, t: 360 * 60000 + 30000 },
+    ...[1, 2, 3, 4, 5, 6, 7].map((k) => ({ lat: 35.80003, lon: -78.8 + k * 0.002, t: 361 * 60000 + k * 10000 })),
+    ...[1, 2, 3, 4, 5, 6].map((k) => ({ lat: 35.8 + k * 0.002, lon: -78.786, t: 362 * 60000 + k * 10000 })),
+    ...[1, 2, 3, 4].map((k) => ({ lat: 35.812, lon: -78.786 - k * 0.001, t: 363 * 60000 + k * 10000 })),
+  ];
+  const made = routeFromDrive(sheetD, plannedD, around, { minuteOf, lines: mapD.map((l) => ({ ...l, keys: [...l.keys], coords: [...l.coords] })) });
+  assert.ok(made);
+  assert.deepEqual(made.offSheet, [0]);
+  assert.equal(made.legsDriven, 0);
+  assert.ok(made.route.coords.every((p) => p[0] <= -78.79 + 1e-9), "the route stays on the sheet's streets");
+  assert.ok(made.route.turnMarks.some((t) => t.kind === "left" && t.street === "C ST"));
+  assert.ok(made.route.warnings.some((w) => /follows the trip sheet instead/.test(w.message)));
+});

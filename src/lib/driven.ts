@@ -330,6 +330,9 @@ export function placeNear(places: RawPlace[], p: LonLat, maxM = 400): string | u
   return best?.name;
 }
 
+/** A street name for comparing: "NC 55 Hwy" and "nc 55" match. */
+const plainStreet = (street: string) => street.toLowerCase().replace(/[^a-z0-9]/g, "").replace(/(hwy|highway)$/, "");
+
 export type DrivenOptions = {
   minuteOf?: (t: number) => number;
   /** The run's map, to find where the drive gets onto each printed street. */
@@ -347,6 +350,8 @@ export type DrivenRoute = {
   legs: number;
   turnsKept: number;
   turnsMissed: string[];
+  /** Legs, by their first stop, driven another way than the sheet prints: planned instead. */
+  offSheet: number[];
   /** Where the drive begins and ends in place of the sheet's first and last stop, to name them. */
   start?: LonLat;
   end?: LonLat;
@@ -405,6 +410,7 @@ export function routeFromDrive(sheet: Sheet, planned: RouteSuccess, fixesIn: Fix
   const newStops: PlacedStop[] = [];
   const turnMarks: TurnMark[] = [];
   const turnsMissed: string[] = [];
+  const offSheet: { stop: number; missed: string[] }[] = [];
   const keepPlanned: [number, number][] = [];
   const marksIn = (a: number, b: number, last: boolean) => planned.turnMarks.filter((t) => t.trackIndex >= a && (last ? t.trackIndex <= b : t.trackIndex < b));
   const push = (points: LonLat[]) => {
@@ -425,8 +431,13 @@ export function routeFromDrive(sheet: Sheet, planned: RouteSuccess, fixesIn: Fix
     newStops[i] = { ...stops[i], lat: p[1], lon: p[0], trackIndex, ...mine };
   };
 
-  /** The sheet's directions for leg `i`, placed where the drive (`part`, from `offset`) takes them. */
-  const placeDirections = (i: number, part: LonLat[], offset: number) => {
+  /**
+   * The sheet's directions for leg `i`, placed where the drive (`part`)
+   * takes them, by index into `part`; and the printed turns it doesn't take.
+   */
+  const placeDirections = (i: number, part: LonLat[]) => {
+    const marks: TurnMark[] = [];
+    const missed: string[] = [];
     const sheetStop = sheet.stops[stops[i].index];
     const a = stops[i].trackIndex;
     const b = stops[i + 1].trackIndex;
@@ -437,6 +448,10 @@ export function routeFromDrive(sheet: Sheet, planned: RouteSuccess, fixesIn: Fix
       // "Right Turn Onto ROUNDABOUT, Left Turn On ROUNDABOUT, Right Turn Onto X": the right is the exit.
       const exitsRoundabout = roundabout && (m.kind === "left" || m.kind === "right");
       roundabout = isPassThrough(m.street) ? /round|circle|rotary/i.test(m.street) : false;
+      // Out of a roundabout back onto the street the bus is already on: straight
+      // through, no turn. Placing it would land on the turn onto that street.
+      const prior = (sheetStop?.maneuvers ?? []).slice(0, maneuverIndex).filter((p) => !isPassThrough(p.street)).at(-1);
+      if (exitsRoundabout && prior && plainStreet(prior.street) === plainStreet(m.street)) return;
       // Where the planned route turns, when the drive turns there too: the exact corner.
       let k = -1;
       const mark = plannedMarks.find((t) => t.maneuverIndex === maneuverIndex);
@@ -454,20 +469,22 @@ export function routeFromDrive(sheet: Sheet, planned: RouteSuccess, fixesIn: Fix
       if (street) k = joinsStreet(part, from, street);
       if (k < 0) {
         // A turn the planned route made that the drive didn't.
-        if (mark && m.kind !== "proceed") turnsMissed.push(m.kind === "turnaround" ? `turnaround on ${m.street}` : `${m.kind} onto ${m.street}`);
+        // Only a street the map knows can be checked: a school's driveway has no name there.
+        if (mark && m.kind !== "proceed" && m.kind !== "turnaround" && streetFor(m.street)) missed.push(`${m.kind} onto ${m.street}`);
         return;
       }
       from = k;
-      turnMarks.push({
+      marks.push({
         stopIndex: stops[i].index,
         maneuverIndex,
         kind: m.kind,
         street: m.street,
-        trackIndex: offset + k,
+        trackIndex: k,
         confirmed: true,
         ...(exitsRoundabout || mark?.via === "roundabout" ? { via: "roundabout" as const } : {}),
       });
     });
+    return { marks, missed };
   };
 
   // Before the first stop (rarely anything) as planned.
@@ -497,11 +514,33 @@ export function routeFromDrive(sheet: Sheet, planned: RouteSuccess, fixesIn: Fix
       i++;
       continue;
     }
+    if (q > i + 1) {
+      // Driven in another order than the sheet: the trip sheet comes first,
+      // so these stops keep the sheet's order and its planned road.
+      for (let k = i; k < q; k++) {
+        driven.delete(k);
+        reordered.add(k);
+        plannedPart(stops[k].trackIndex, stops[k + 1].trackIndex, false);
+        placeStop(k + 1, coords.length - 1);
+      }
+      i = q;
+      continue;
+    }
     const part = fixes.slice(at[i], at[q] + 1).map(point);
+    const directions = placeDirections(i, part);
+    if (directions.missed.length) {
+      // The trip sheet comes first: a leg driven another way than its
+      // printed turns is planned from the sheet instead.
+      offSheet.push({ stop: i, missed: directions.missed });
+      driven.delete(i);
+      plannedPart(stops[i].trackIndex, stops[i + 1].trackIndex, false);
+      placeStop(i + 1, coords.length - 1);
+      i++;
+      continue;
+    }
     const offset = push(part);
     for (let k = i; k <= q; k++) placeStop(k, offset + at[k] - at[i]);
-    // Driven in another order, the sheet's directions would point the wrong way.
-    if (q === i + 1) placeDirections(i, part, offset);
+    for (const t of directions.marks) turnMarks.push({ ...t, trackIndex: offset + t.trackIndex });
     i = q;
   }
   const lastAt = stops[legs].trackIndex;
@@ -515,7 +554,7 @@ export function routeFromDrive(sheet: Sheet, planned: RouteSuccess, fixesIn: Fix
     const grid = segmentGrid(options.lines);
     const under = coords.map((p) => streetAt(grid, p));
     const sheetMarks = [...turnMarks];
-    const plain = (street: string) => street.toLowerCase().replace(/[^a-z0-9]/g, "").replace(/(hwy|highway)$/, "");
+    const plain = plainStreet;
     for (const turn of mapTurns(coords, under)) {
       if (keepPlanned.some(([a, b]) => turn.k >= a && turn.k <= b)) continue;
       const here = along[turn.k];
@@ -538,11 +577,14 @@ export function routeFromDrive(sheet: Sheet, planned: RouteSuccess, fixesIn: Fix
 
     // Two cues onto the same street a few meters apart (a left onto it, then
     // a roundabout's exit back onto it): the later one is how the bus leaves.
+    // A plain "proceed on" it after a printed turn onto it says nothing new:
+    // the turn stays.
     turnMarks.sort((x, y) => x.trackIndex - y.trackIndex);
     for (let n = turnMarks.length - 2; n >= 0; n--) {
       const a = turnMarks[n];
       const b = turnMarks[n + 1];
-      if (plain(a.street) === plain(b.street) && along[b.trackIndex] - along[a.trackIndex] < 40) turnMarks.splice(n, 1);
+      if (plain(a.street) !== plain(b.street) || along[b.trackIndex] - along[a.trackIndex] >= 40) continue;
+      turnMarks.splice(b.kind === "proceed" && !b.via && a.kind !== "proceed" ? n + 1 : n, 1);
     }
 
     // On and off a highway: the map has no ramps, so a ramp is where the
@@ -592,9 +634,13 @@ export function routeFromDrive(sheet: Sheet, planned: RouteSuccess, fixesIn: Fix
   if (ownEnd) info(`The drive ends at ${options.endName ?? "where the bus parked"}, not the sheet's ${stops[legs].description}.`);
   if (reordered.size) {
     const nums = [...reordered].map((n) => n + 1);
-    info(`You drove stop${nums.length > 1 ? "s" : ""} ${nums.join(", ")} in another order than the sheet. The route follows your order there, without the sheet's turns.`);
+    info(`You drove stop${nums.length > 1 ? "s" : ""} ${nums.join(", ")} in another order than the sheet. The route keeps the sheet's order and turns there.`);
   }
   for (const missed of turnsMissed) info(`The recorded drive doesn't take the sheet's ${missed}, so that turn is left out.`);
+  for (const leg of offSheet) {
+    const from = sheet.stops[stops[leg.stop].index]?.description ?? `stop ${leg.stop + 1}`;
+    info(`After ${from} the recorded drive skips the sheet's ${leg.missed.join(", ")}; that leg follows the trip sheet instead.`);
+  }
 
   const meters = polylineMeters(coords);
   // Stops in the order they come along the track, the driver's order: the
@@ -623,6 +669,7 @@ export function routeFromDrive(sheet: Sheet, planned: RouteSuccess, fixesIn: Fix
     legs,
     turnsKept: turnMarks.length,
     turnsMissed,
+    offSheet: offSheet.map((leg) => leg.stop),
     ...(ownStart ? { start: coords[0] } : {}),
     ...(ownEnd ? { end: coords[coords.length - 1] } : {}),
   };

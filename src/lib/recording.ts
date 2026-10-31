@@ -46,12 +46,17 @@ export function dwellsOf(fixes: Fix[], minuteOf: (t: number) => number = localMi
 }
 
 /**
- * The recorded stop for each sheet stop the route couldn't pin down. Stops
- * the route placed for sure are matched first, in order, to the standstill
- * at their marker; that tells how late the bus was running. An unsure stop
+ * The recorded stop for each sheet stop the route couldn't pin down, or whose
+ * marker is off where the bus stood. Stops the route placed for sure are
+ * matched first, in order, to the standstill near their marker; that tells
+ * how late the bus was running, and moves a marker more than 30 m off. An unsure stop
  * then takes the free standstill nearest its marker around the time the bus
  * should have been there, even when the driver ran the stops in another order.
  */
+/** How far from its marker a sure stop's standstill may be, and how far off moves the stop. */
+const SURE_M = 150;
+const MOVE_M = 30;
+
 export function stopsFromRecording(
   stops: { time: string; lat: number; lon: number }[],
   dwells: Dwell[],
@@ -70,7 +75,7 @@ export function stopsFromRecording(
       const m = haversine([stop.lon, stop.lat], [d.lon, d.lat]);
       // A stop the route placed for sure is where its marker is; a standstill
       // farther off was the bus waiting somewhere else.
-      if (late > (sure ? 15 : 8) || m > (sure ? 100 : 1000)) return;
+      if (late > (sure ? 15 : 8) || m > (sure ? SURE_M : 1000)) return;
       const score = late + m / 40;
       if (!best || score < best.score) best = { k, score };
     });
@@ -85,6 +90,9 @@ export function stopsFromRecording(
     after = best.k;
     delay = dwells[best.k].minute - minute;
     lateBy[index] = delay;
+    // The marker is off where the bus really stands: the stop is where it stood.
+    const at = dwells[best.k];
+    if (haversine([stop.lon, stop.lat], [at.lon, at.lat]) > MOVE_M) pins[index] = { lat: at.lat, lon: at.lon };
   });
   stops.forEach((stop, index) => {
     const minute = minutesOf(stop.time);
