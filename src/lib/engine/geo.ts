@@ -30,6 +30,102 @@ export function turnAngle(fromDeg: number, toDeg: number): number {
   return ((toDeg - fromDeg + 540) % 360) - 180;
 }
 
+/**
+ * Which way a roundabout takes the bus, from the road it drives: the heading
+ * well before the exit at `k` against the heading just after. A sheet prints
+ * every exit as a right turn, the way you leave the circle; the driver needs
+ * to know which exit: bearing right, straight on, or round to the left.
+ */
+export function roundaboutWay(track: LonLat[], k: number): "left" | "right" | "proceed" | null {
+  /** The point `meters` along the track from `k`, or null past either end. */
+  const at = (meters: number): LonLat | null => {
+    let i = k;
+    let left = Math.abs(meters);
+    const step = meters < 0 ? -1 : 1;
+    for (;;) {
+      if (i + step < 0 || i + step >= track.length) return null;
+      const a = track[i];
+      const b = track[i + step];
+      const d = haversine(a, b);
+      if (d >= left) {
+        const t = d > 0 ? left / d : 0;
+        return [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
+      }
+      left -= d;
+      i += step;
+    }
+  };
+  const [a, b, c, d] = [at(-140), at(-70), at(30), at(100)];
+  // Too little road on either side to tell: keep what the sheet says.
+  if (!a || !b || !c || !d) return null;
+  const angle = turnAngle(bearing(a, b), bearing(c, d));
+  return angle > 45 ? "right" : angle < -45 ? "left" : "proceed";
+}
+
+/** Roundabout exits take their way from the track (see roundaboutWay). */
+export function roundaboutWays<T extends { trackIndex: number; kind: string; via?: string }>(track: LonLat[], marks: T[]): T[] {
+  for (const mark of marks) {
+    if (mark.via === "roundabout" && mark.trackIndex >= 0 && mark.trackIndex < track.length) {
+      const way = roundaboutWay(track, mark.trackIndex);
+      if (way) mark.kind = way as T["kind"];
+    }
+  }
+  return marks;
+}
+
+/**
+ * Signed bend of the track at `k`: the heading over the 45 m before it against
+ * the 35 m after. Short, so the next corner a block on doesn't count.
+ */
+function bendAt(track: LonLat[], along: number[], k: number): number | null {
+  const point = (target: number): LonLat | null => {
+    if (target < 0 || target > along[along.length - 1]) return null;
+    let i = k;
+    while (i > 0 && along[i] > target) i--;
+    while (i + 1 < along.length && along[i + 1] < target) i++;
+    if (i + 1 >= along.length) return track[i];
+    const span = along[i + 1] - along[i];
+    const t = span > 0 ? (target - along[i]) / span : 0;
+    return [track[i][0] + (track[i + 1][0] - track[i][0]) * t, track[i][1] + (track[i + 1][1] - track[i][1]) * t];
+  };
+  const [a, b, c, d] = [point(along[k] - 45), point(along[k] - 8), point(along[k] + 8), point(along[k] + 35)];
+  if (!a || !b || !c || !d) return null;
+  return turnAngle(bearing(a, b), bearing(c, d));
+}
+
+/**
+ * A left or right placed where the road runs straight, a little past the
+ * corner the bus really turns at: the map's name for the new street starts
+ * further in. The cue moves back to that corner, within 200 m and with no
+ * other cue between.
+ */
+export function turnsAtCorners<T extends { trackIndex: number; kind: string; via?: string }>(track: LonLat[], marks: T[]): T[] {
+  if (track.length < 3) return marks;
+  const along = [0];
+  for (let i = 1; i < track.length; i++) along.push(along[i - 1] + haversine(track[i - 1], track[i]));
+  const sorted = [...marks].sort((x, y) => x.trackIndex - y.trackIndex);
+  sorted.forEach((mark, n) => {
+    if (mark.via || (mark.kind !== "left" && mark.kind !== "right")) return;
+    const k = mark.trackIndex;
+    if (k <= 0 || k >= track.length) return;
+    const sign = mark.kind === "right" ? 1 : -1;
+    const here = bendAt(track, along, k);
+    if (here == null || here * sign >= 30) return;
+    const floor = n > 0 ? sorted[n - 1].trackIndex : 0;
+    let best = -1;
+    let bestBend = 45;
+    for (let j = k - 1; j > floor && along[k] - along[j] <= 200; j--) {
+      const bend = bendAt(track, along, j);
+      if (bend != null && bend * sign > bestBend) {
+        bestBend = bend * sign;
+        best = j;
+      }
+    }
+    if (best >= 0) mark.trackIndex = best;
+  });
+  return marks;
+}
+
 export function polylineMeters(coords: LonLat[]): number {
   let m = 0;
   for (let i = 1; i < coords.length; i++) m += haversine(coords[i - 1], coords[i]);

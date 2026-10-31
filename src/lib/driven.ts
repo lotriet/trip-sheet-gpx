@@ -1,5 +1,5 @@
 import { minutesOf } from "./batch";
-import { bearing, haversine, minDistToLine, polylineMeters, turnAngle } from "./engine/geo";
+import { bearing, haversine, minDistToLine, polylineMeters, roundaboutWays, turnAngle, turnsAtCorners } from "./engine/geo";
 import { buildGpx } from "./engine/gpx";
 import { isPassThrough } from "./engine/names";
 import { resolveTarget } from "./engine/route";
@@ -420,10 +420,25 @@ export function routeFromDrive(sheet: Sheet, planned: RouteSuccess, fixesIn: Fix
     return offset;
   };
   const plannedPart = (a: number, b: number, last: boolean) => {
-    const offset = push(planned.coords.slice(a, b + 1));
+    // Join where the line already is: the planned road's nearest point just
+    // past its start, not its stop pin a few meters behind where the bus stood.
+    let from = a;
+    if (coords.length) {
+      const end = coords[coords.length - 1];
+      let best = haversine(end, planned.coords[a]);
+      for (let k = a + 1; k < b && haversine(planned.coords[a], planned.coords[k]) <= 60; k++) {
+        const d = haversine(end, planned.coords[k]);
+        if (d < best) {
+          best = d;
+          from = k;
+        }
+      }
+    }
+    const offset = push(planned.coords.slice(from, b + 1));
     keepPlanned.push([offset, coords.length - 1]);
-    for (const t of marksIn(a, b, last)) turnMarks.push({ ...t, trackIndex: offset + t.trackIndex - a });
+    for (const t of marksIn(a, b, last)) turnMarks.push({ ...t, trackIndex: offset + Math.max(0, t.trackIndex - from) });
   };
+  const endsPlanned = () => keepPlanned.length > 0 && keepPlanned[keepPlanned.length - 1][1] === coords.length - 1;
   const placeStop = (i: number, trackIndex: number, own?: { description: string; t: number }) => {
     const p = coords[trackIndex];
     // Where the bus set off or parked takes the time it did so on the drive.
@@ -528,10 +543,13 @@ export function routeFromDrive(sheet: Sheet, planned: RouteSuccess, fixesIn: Fix
     }
     const part = fixes.slice(at[i], at[q] + 1).map(point);
     const directions = placeDirections(i, part);
-    if (directions.missed.length) {
+    // A few meters driven between two stops at one spot, after a planned leg:
+    // planned too, or the line would step back to where the bus stood.
+    const hop = endsPlanned() && polylineMeters(part) < 80;
+    if (hop || directions.missed.length) {
       // The trip sheet comes first: a leg driven another way than its
       // printed turns is planned from the sheet instead.
-      offSheet.push({ stop: i, missed: directions.missed });
+      if (directions.missed.length) offSheet.push({ stop: i, missed: directions.missed });
       driven.delete(i);
       plannedPart(stops[i].trackIndex, stops[i + 1].trackIndex, false);
       placeStop(i + 1, coords.length - 1);
@@ -646,6 +664,9 @@ export function routeFromDrive(sheet: Sheet, planned: RouteSuccess, fixesIn: Fix
   // Stops in the order they come along the track, the driver's order: the
   // run's file and the day file list them so, and GPX Nav follows that order.
   const inDriveOrder = [...newStops].sort((x, y) => x.trackIndex - y.trackIndex);
+  turnMarks.sort((x, y) => x.trackIndex - y.trackIndex);
+  roundaboutWays(coords, turnMarks);
+  turnsAtCorners(coords, turnMarks);
   turnMarks.sort((x, y) => x.trackIndex - y.trackIndex);
   // The sheet's directions from its first stop don't apply when the bus set off from elsewhere.
   const named = {

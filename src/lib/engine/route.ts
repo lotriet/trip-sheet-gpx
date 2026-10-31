@@ -8,6 +8,8 @@ import {
   nearestIndex,
   polylineMeters,
   projectPoint,
+  roundaboutWays,
+  turnsAtCorners,
   turnAngle,
 } from "./geo";
 import { buildGraph, edgeHas, edgeServes, keysInGraph, nodeHas, type Graph, type GraphEdge, type GraphLine, type GraphNode } from "./graph";
@@ -1321,6 +1323,8 @@ async function routeFrom(
   const placement = placeStops(sheet, coords, anchors, turnMarks, graph, available, places, addresses, overrides.stops);
   warnings.push(...placement.warnings);
   const meters = polylineMeters(coords);
+  roundaboutWays(coords, turnMarks);
+  turnsAtCorners(coords, turnMarks);
   const gpx = buildGpx(sheet, coords, placement.stops, turnMarks);
   return {
     ok: true,

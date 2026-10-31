@@ -4,7 +4,7 @@ import { buildDayGpx, runGpxParts } from "../src/lib/dayPlan";
 import { haversine } from "../src/lib/engine/geo";
 import { parseSheet } from "../src/lib/engine/parseSheet";
 import { routeSheet } from "../src/lib/engine/route";
-import type { RawLine } from "../src/lib/engine/types";
+import type { LonLat, RawLine } from "../src/lib/engine/types";
 
 // Made-up streets on a grid.
 const line = (name: string, keys: string[], coords: [number, number][]): RawLine => ({ name, keys, coords, kind: "named", oneway: 0 });
@@ -132,4 +132,56 @@ Proceed Onto WADE AVE
   assert.ok(asked > 0);
   assert.doesNotMatch(result.warnings.map((w) => w.message).join("\n"), /Couldn't stay on the sheet/);
   assert.ok(result.coords.some(([lon]) => lon > -78.6), "the track reaches Wade Ave");
+});
+
+test("a roundabout exit is the way the road goes, not the sheet's 'right turn onto'", async () => {
+  const { roundaboutWays } = await import("../src/lib/engine/geo");
+  // South into the circle, out to the east: round to the left (3rd exit).
+  const south: LonLat[] = [0, 1, 2, 3, 4, 5].map((k) => [-78.8, 35.81 - k * 0.0005]);
+  const east: LonLat[] = [1, 2, 3, 4, 5].map((k) => [-78.8 + k * 0.0005, 35.8075]);
+  const track = [...south, ...east];
+  const marks = roundaboutWays(track, [{ trackIndex: 5, kind: "right", street: "GULL POINT RD", via: "roundabout" }]);
+  assert.equal(marks[0].kind, "left");
+  // Out to the west it is the first exit, a right; straight on, it says so.
+  const west: LonLat[] = [1, 2, 3, 4, 5].map((k) => [-78.8 - k * 0.0005, 35.8075]);
+  assert.equal(roundaboutWays([...south, ...west], [{ trackIndex: 5, kind: "left", street: "X", via: "roundabout" }])[0].kind, "right");
+  const on: LonLat[] = [6, 7, 8, 9, 10].map((k) => [-78.8, 35.81 - k * 0.0005]);
+  assert.equal(roundaboutWays([...south, ...on], [{ trackIndex: 5, kind: "right", street: "X", via: "roundabout" }])[0].kind, "proceed");
+});
+
+test("a turn placed where the new street's name starts moves back to the corner", async () => {
+  const { turnsAtCorners, haversine: dist } = await import("../src/lib/engine/geo");
+  // South on NC 55, right (west) at the corner; the map names the road
+  // Green Level West Rd only from 130 m in.
+  const south: LonLat[] = [0, 1, 2, 3, 4, 5, 6].map((k) => [-78.871, 35.7905 - k * 0.0005]);
+  const west: LonLat[] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14].map((k) => [-78.871 - k * 0.0002, 35.7875]);
+  const track = [...south, ...west];
+  const corner = 6;
+  const late = track.findIndex((p) => dist(p, track[corner]) > 125 && p[1] === 35.7875);
+  const marks = turnsAtCorners(track, [{ trackIndex: late, kind: "right", street: "GREEN LEVEL WEST RD" }]);
+  assert.equal(marks[0].trackIndex, corner);
+  // At the corner already, it stays.
+  assert.equal(turnsAtCorners(track, [{ trackIndex: corner, kind: "right", street: "X" }])[0].trackIndex, corner);
+  // Never back past the cue before it.
+  const kept = turnsAtCorners(track, [{ trackIndex: corner + 1, kind: "proceed", street: "Y" }, { trackIndex: late, kind: "right", street: "X" }]);
+  assert.equal(kept[1].trackIndex, late);
+});
+
+test("a late turn moves back to its corner even with the next corner just after it", async () => {
+  const { turnsAtCorners, haversine: dist } = await import("../src/lib/engine/geo");
+  // South, right onto the road the map names late, then right again 40 m on (Oakfield Ave).
+  const south: LonLat[] = [0, 1, 2, 3, 4, 5, 6].map((k) => [-78.871, 35.7905 - k * 0.0005]);
+  const west: LonLat[] = [1, 2, 3, 4, 5, 6, 7, 8, 9].map((k) => [-78.871 - k * 0.0002, 35.7875]);
+  const north: LonLat[] = [1, 2, 3, 4, 5, 6].map((k) => [-78.8728, 35.7875 + k * 0.0003]);
+  const track = [...south, ...west, ...north];
+  const corner = 6;
+  const late = west.findIndex((p) => dist(p, track[corner]) > 120) + south.length;
+  const next = south.length + west.length - 1;
+  assert.ok(dist(track[late], track[next]) < 60, "the next corner is close after the late cue");
+  const marks = turnsAtCorners(track, [
+    { trackIndex: late, kind: "right", street: "GREEN LEVEL WEST RD" },
+    { trackIndex: next, kind: "right", street: "OAKFIELD AVE" },
+  ]);
+  assert.equal(marks[0].trackIndex, corner);
+  assert.equal(marks[1].trackIndex, next);
 });
