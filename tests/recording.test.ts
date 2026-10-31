@@ -47,3 +47,24 @@ test("a bus running late still has its unsure stops matched", () => {
   ];
   assert.deepEqual(stopsFromRecording(stops, dwells, new Set([2])), { 2: { lat: 35.803, lon: -78.8 } });
 });
+
+test("a street-address stop goes where the bus stood, even first in a run", async () => {
+  const { isAddressStop } = await import("../src/lib/recording");
+  assert.equal(isAddressStop("100 GREEN LEVEL WEST RD - DOORSIDE"), true);
+  assert.equal(isAddressStop("Deadhead - 100 GREEN LEVEL WEST RD - DOORSIDE"), true);
+  assert.equal(isAddressStop("1 OAK RIDGE MS"), false);
+  assert.equal(isAddressStop("CHURCH ST & ROBIN ST"), false);
+  // Run 3 starts at 4:03 at an address the map put 450 m off; the bus stood
+  // there 10 minutes late, as it was at White Oak ES next.
+  const stops = [
+    { time: "4:03 PM", lat: 35.77266, lon: -78.92738, description: "Deadhead - 100 GREEN LEVEL WEST RD" },
+    { time: "4:07 PM", lat: 35.78022, lon: -78.9213, description: "SCHOOL: WHITE OAK ES" },
+  ];
+  const dwells = [
+    { lat: 35.77287, lon: -78.92737, minute: 16 * 60 + 5, seconds: 13 }, // a light near the wrong pin, on time
+    { lat: 35.77398, lon: -78.92266, minute: 16 * 60 + 13, seconds: 25 }, // the real stop, 10 min late
+    { lat: 35.78022, lon: -78.9213, minute: 16 * 60 + 17, seconds: 134 }, // White Oak ES
+  ];
+  const pins = stopsFromRecording(stops, dwells, new Set());
+  assert.deepEqual(pins[0], { lat: 35.77398, lon: -78.92266 });
+});

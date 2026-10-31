@@ -1,5 +1,5 @@
 import { minutesOf } from "./batch";
-import { bearing, haversine, minDistToLine, polylineMeters, roundaboutWays, turnAngle, turnsAtCorners } from "./engine/geo";
+import { bearing, haversine, minDistToLine, polylineMeters, projectPoint, roundaboutWays, turnAngle, turnsAtCorners } from "./engine/geo";
 import { buildGpx } from "./engine/gpx";
 import { isPassThrough } from "./engine/names";
 import { resolveTarget } from "./engine/route";
@@ -333,11 +333,37 @@ export function placeNear(places: RawPlace[], p: LonLat, maxM = 400): string | u
 /** A street name for comparing: "NC 55 Hwy" and "nc 55" match. */
 const plainStreet = (street: string) => street.toLowerCase().replace(/[^a-z0-9]/g, "").replace(/(hwy|highway)$/, "");
 
+/**
+ * "Deadhead - 100 GREEN LEVEL WEST RD" right after a run that ended at
+ * 100 GREEN LEVEL WEST RD: the next run starts where the last one ended,
+ * not where a map guesses the address is.
+ */
+export function startsWhereLastEnded(
+  first: { description: string } | undefined,
+  lastOfPrevious: { description: string; lat: number; lon: number } | undefined,
+): { lat: number; lon: number } | null {
+  if (!first || !lastOfPrevious) return null;
+  const plain = (d: string) => d.replace(/^\s*deadhead\s*[-–:]\s*/i, "").toLowerCase().replace(/[^a-z0-9]/g, "");
+  if (!/^\s*deadhead\b/i.test(first.description) || plain(first.description) !== plain(lastOfPrevious.description)) return null;
+  return { lat: lastOfPrevious.lat, lon: lastOfPrevious.lon };
+}
+
 export type DrivenOptions = {
   minuteOf?: (t: number) => number;
   /** The run's map, to find where the drive gets onto each printed street. */
   lines?: RawLine[];
   places?: RawPlace[];
+  /**
+   * Where the run's first stop really is, when the map's guess is off: the
+   * previous run ended there (see startsWhereLastEnded). It is found on the
+   * drive there; the router keeps a run's first stop where the map put it.
+   */
+  firstStopAt?: { lat: number; lon: number };
+  /**
+   * When the run before ended on the same recording (ms since epoch): this
+   * run can't start earlier, even where the bus passed its start before.
+   */
+  after?: number;
   /** Names for where the drive starts and ends when the bus doesn't start or end at a sheet stop. */
   startName?: string;
   endName?: string;
@@ -352,6 +378,8 @@ export type DrivenRoute = {
   turnsMissed: string[];
   /** Legs, by their first stop, driven another way than the sheet prints: planned instead. */
   offSheet: number[];
+  /** When the bus left the run's last stop on the drive (ms since epoch), if it came by. */
+  endsAt?: number;
   /** Where the drive begins and ends in place of the sheet's first and last stop, to name them. */
   start?: LonLat;
   end?: LonLat;
@@ -367,10 +395,16 @@ export type DrivenRoute = {
  */
 export function routeFromDrive(sheet: Sheet, planned: RouteSuccess, fixesIn: Fix[], options: DrivenOptions = {}): DrivenRoute | null {
   const minuteOf = options.minuteOf ?? localMinute;
-  const fixes = fixesIn.filter((f, k) => k === 0 || k === fixesIn.length - 1 || haversine(point(fixesIn[k - 1]), point(f)) >= 3);
+  const later = options.after == null ? fixesIn : fixesIn.filter((f) => f.t >= options.after!);
+  const fixes = later.filter((f, k) => k === 0 || k === later.length - 1 || haversine(point(later[k - 1]), point(f)) >= 3);
   const stops = planned.stops;
   if (stops.length < 2 || fixes.length < 2) return null;
-  const at = stopsOnDrive(stops, fixes, minuteOf);
+  const firstPin = options.firstStopAt;
+  const at = stopsOnDrive(
+    firstPin ? [{ ...stops[0], lat: firstPin.lat, lon: firstPin.lon }, ...stops.slice(1)] : stops,
+    fixes,
+    minuteOf,
+  );
   const legs = stops.length - 1;
   // Each stretch of the drive between two stops, from the stop it starts at.
   const blocks = new Map<number, number>();
@@ -420,23 +454,50 @@ export function routeFromDrive(sheet: Sheet, planned: RouteSuccess, fixesIn: Fix
     return offset;
   };
   const plannedPart = (a: number, b: number, last: boolean) => {
-    // Join where the line already is: the planned road's nearest point just
-    // past its start, not its stop pin a few meters behind where the bus stood.
+    // Join where the line already is: onto the planned road at the point
+    // nearest the bus, not back at its stop pin a few meters behind.
     let from = a;
+    let head: LonLat[] = [];
     if (coords.length) {
       const end = coords[coords.length - 1];
-      let best = haversine(end, planned.coords[a]);
-      for (let k = a + 1; k < b && haversine(planned.coords[a], planned.coords[k]) <= 60; k++) {
-        const d = haversine(end, planned.coords[k]);
-        if (d < best) {
-          best = d;
-          from = k;
-        }
+      let best = { d: haversine(end, planned.coords[a]), seg: -1, point: planned.coords[a] };
+      let run = 0;
+      for (let k = a; k < b && run <= 120; k++) {
+        const near = projectPoint(end, planned.coords[k], planned.coords[k + 1]);
+        if (near.d < best.d - 0.5) best = { d: near.d, seg: k, point: near.point };
+        run += haversine(planned.coords[k], planned.coords[k + 1]);
+      }
+      if (best.seg >= 0 && best.d < 40) {
+        from = best.seg + 1;
+        head = [best.point];
       }
     }
-    const offset = push(planned.coords.slice(from, b + 1));
+    const offset = push([...head, ...planned.coords.slice(from, b + 1)]);
     keepPlanned.push([offset, coords.length - 1]);
-    for (const t of marksIn(a, b, last)) turnMarks.push({ ...t, trackIndex: offset + Math.max(0, t.trackIndex - from) });
+    for (const t of marksIn(a, b, last)) {
+      turnMarks.push({ ...t, trackIndex: t.trackIndex < from ? offset : offset + head.length + t.trackIndex - from });
+    }
+  };
+  /**
+   * Before a recorded stretch that starts where a planned one ends: the
+   * planned road's last meters past where the bus picks up come off, so the
+   * line doesn't run on and turn back.
+   */
+  const trimPlannedTo = (p: LonLat) => {
+    const range = keepPlanned[keepPlanned.length - 1];
+    if (!range || range[1] !== coords.length - 1) return;
+    let best = { d: haversine(coords[coords.length - 1], p), seg: -1, point: p };
+    let run = 0;
+    for (let k = coords.length - 2; k >= range[0] && run <= 150; k--) {
+      const near = projectPoint(p, coords[k], coords[k + 1]);
+      if (near.d < best.d - 0.5) best = { d: near.d, seg: k, point: near.point };
+      run += haversine(coords[k], coords[k + 1]);
+    }
+    if (best.seg < 0 || best.d >= 40) return;
+    coords.length = best.seg + 1;
+    coords.push(best.point);
+    range[1] = coords.length - 1;
+    for (const t of turnMarks) if (t.trackIndex > range[1]) t.trackIndex = range[1];
   };
   const endsPlanned = () => keepPlanned.length > 0 && keepPlanned[keepPlanned.length - 1][1] === coords.length - 1;
   const placeStop = (i: number, trackIndex: number, own?: { description: string; t: number }) => {
@@ -519,7 +580,9 @@ export function routeFromDrive(sheet: Sheet, planned: RouteSuccess, fixesIn: Fix
     const q = blocks.get(i);
     if (q == null) {
       if (i === legs - 1 && ownEnd) {
-        const offset = push(fixes.slice(at[i], endAt + 1).map(point));
+        const home = fixes.slice(at[i], endAt + 1).map(point);
+        trimPlannedTo(home[0]);
+        const offset = push(home);
         placeStop(i, offset);
         placeStop(legs, coords.length - 1, { description: options.endName ?? "End of the recorded drive", t: fixes[endAt].t });
       } else {
@@ -556,6 +619,7 @@ export function routeFromDrive(sheet: Sheet, planned: RouteSuccess, fixesIn: Fix
       i++;
       continue;
     }
+    trimPlannedTo(part[0]);
     const offset = push(part);
     for (let k = i; k <= q; k++) placeStop(k, offset + at[k] - at[i]);
     for (const t of directions.marks) turnMarks.push({ ...t, trackIndex: offset + t.trackIndex });
@@ -563,6 +627,58 @@ export function routeFromDrive(sheet: Sheet, planned: RouteSuccess, fixesIn: Fix
   }
   const lastAt = stops[legs].trackIndex;
   if (!ownEnd && lastAt < planned.coords.length - 1) plannedPart(lastAt, planned.coords.length - 1, true);
+
+  // A planned leg that runs out and back the same way, with no stop or
+  // printed turnaround on it: the router reaching a turn from the wrong side.
+  // The spur goes, and a cue on it moves to the corner where it began.
+  {
+    const placed = new Set(newStops.filter(Boolean).map((st) => st.trackIndex));
+    const turnaroundAt = new Set(turnMarks.filter((t) => t.kind === "turnaround").map((t) => t.trackIndex));
+    const drop = new Set<number>();
+    const moveTo = new Map<number, number>();
+    for (const [a, b] of keepPlanned) {
+      for (let i = a; i < b; i++) {
+        let far = i;
+        let run = 0;
+        for (let j = i + 1; j <= b && run <= 300; j++) {
+          run += haversine(coords[j - 1], coords[j]);
+          if (haversine(coords[i], coords[j]) > haversine(coords[i], coords[far])) far = j;
+          const out = haversine(coords[i], coords[far]);
+          if (j <= far + 0 || out < 20 || out > 150 || haversine(coords[i], coords[j]) > 8) continue;
+          // Back along the way it came, not round a block.
+          let same = true;
+          for (let k = far + 1; k < j && same; k++) same = minDistToLine(coords[k], coords.slice(i, far + 1)).d <= 12;
+          let clear = true;
+          for (let k = i + 1; k <= j && clear; k++) clear = !placed.has(k) && !turnaroundAt.has(k);
+          if (same && clear) {
+            for (let k = i + 1; k <= j; k++) {
+              drop.add(k);
+              moveTo.set(k, i);
+            }
+            i = j;
+          }
+          break;
+        }
+      }
+    }
+    if (drop.size) {
+      const newIndex: number[] = [];
+      const kept: LonLat[] = [];
+      coords.forEach((p, k) => {
+        if (!drop.has(k)) kept.push(p);
+        newIndex[k] = kept.length - 1;
+      });
+      const remap = (k: number) => newIndex[moveTo.get(k) ?? k];
+      for (const t of turnMarks) t.trackIndex = remap(t.trackIndex);
+      for (const st of newStops) if (st) st.trackIndex = remap(st.trackIndex);
+      for (const range of keepPlanned) {
+        range[0] = remap(range[0]);
+        range[1] = remap(range[1]);
+      }
+      coords.length = 0;
+      coords.push(...kept);
+    }
+  }
 
   // Where the drive changes street with no sheet direction near: from where
   // the bus set off, back to where it parked, or a way the sheet doesn't print.
@@ -691,6 +807,7 @@ export function routeFromDrive(sheet: Sheet, planned: RouteSuccess, fixesIn: Fix
     turnsKept: turnMarks.length,
     turnsMissed,
     offSheet: offSheet.map((leg) => leg.stop),
+    ...(at[legs] >= 0 ? { endsAt: fixes[at[legs]].t } : {}),
     ...(ownStart ? { start: coords[0] } : {}),
     ...(ownEnd ? { end: coords[coords.length - 1] } : {}),
   };

@@ -119,3 +119,38 @@ test("a leg driven another way than the sheet's printed turn follows the trip sh
   assert.ok(made.route.turnMarks.some((t) => t.kind === "left" && t.street === "C ST"));
   assert.ok(made.route.warnings.some((w) => /follows the trip sheet instead/.test(w.message)));
 });
+
+test("a planned leg's out-and-back spur goes, and its turn sits at the corner", () => {
+  // Planned: east, on 70 m past the corner and back, left up C Street, on up
+  // D Street to the stop; the left is marked at the far end of the spur.
+  const spur: LonLat[] = [[-78.7895, 35.8], [-78.78875, 35.8], [-78.7895, 35.8], [-78.79, 35.8]];
+  const dStreet: LonLat[] = [[-78.79, 35.811], [-78.79, 35.812]];
+  const coords: LonLat[] = [...east, ...spur, ...north, ...dStreet];
+  const plannedSpur = {
+    ...planned,
+    coords,
+    stops: [planned.stops[0], { ...planned.stops[1], lat: 35.812, trackIndex: coords.length - 1 }],
+    turnMarks: [{ stopIndex: 0, maneuverIndex: 0, kind: "left", street: "C ST", trackIndex: east.length + 1, confirmed: true }],
+  } as unknown as RouteSuccess;
+  const sheetD = {
+    ...sheet,
+    stops: [{ ...sheet.stops[0], maneuvers: [{ kind: "left", street: "C ST" }, { kind: "proceed", street: "D ST" }] }, sheet.stops[1]],
+  } as unknown as Sheet;
+  const mapD = [...lines, { name: "D Street", keys: ["d st"], coords: [north[4], ...dStreet], kind: "named" as const, oneway: 0 as const }];
+  // The bus went another way, so the leg is planned from the sheet.
+  const around = [
+    { lat: 35.8, lon: -78.8, t: 360 * 60000 },
+    { lat: 35.8, lon: -78.8, t: 360 * 60000 + 30000 },
+    ...[1, 2, 3, 4, 5, 6, 7].map((k) => ({ lat: 35.80003, lon: -78.8 + k * 0.002, t: 361 * 60000 + k * 10000 })),
+    ...[1, 2, 3, 4, 5, 6].map((k) => ({ lat: 35.8 + k * 0.002, lon: -78.786, t: 362 * 60000 + k * 10000 })),
+    ...[1, 2, 3, 4].map((k) => ({ lat: 35.812, lon: -78.786 - k * 0.001, t: 363 * 60000 + k * 10000 })),
+  ];
+  const made = routeFromDrive(sheetD, plannedSpur, around, { minuteOf, lines: mapD.map((l) => ({ ...l, keys: [...l.keys], coords: [...l.coords] })) });
+  assert.ok(made);
+  assert.deepEqual(made.offSheet, [0]);
+  const route = made.route;
+  assert.ok(route.coords.every((p) => p[0] <= -78.79 + 1e-9), "no spur east of the corner");
+  const left = route.turnMarks.find((t) => t.street === "C ST");
+  assert.ok(left);
+  assert.ok(Math.abs(route.coords[left.trackIndex][0] - corner[0]) < 1e-6, "the left is at the corner");
+});

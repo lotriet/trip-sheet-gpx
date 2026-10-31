@@ -22,7 +22,7 @@ import { RETAKE_MESSAGE } from "@/lib/ocr/quality";
 import { loadDay, saveDay, type SavedRun } from "@/lib/storage";
 import { dwellsOf, recordedFixes, stopsFromRecording } from "@/lib/recording";
 import { useNewVersionReload } from "@/lib/newVersion";
-import { placeNear, routeFromDrive } from "@/lib/driven";
+import { placeNear, routeFromDrive, startsWhereLastEnded } from "@/lib/driven";
 import { autoGroup, buildTrips, describePage, dropDuplicatePages, gpxFileName, mergeIntoDay, newTripKey, sheetProblems, sortStopsByTime, splitRuns, type PageInfo, type PageRead, type Trip } from "@/lib/batch";
 import { canShareFiles, sendNativeGpx, shareOrDownload, type TextFile } from "@/lib/shareFiles";
 import { buildStreetIndex, checkStop, checkStreet, looseName, sheetStyle, suggestFor as suggestNames } from "@/lib/streetCheck";
@@ -1370,6 +1370,9 @@ export function TripApp() {
     let moved = 0;
     let drivenRuns = 0;
     try {
+      // Where the run before ended, for a run whose sheet starts there again.
+      let previousEnd: { description: string; lat: number; lon: number } | undefined;
+      let previousEndsAt: number | undefined;
       for (const [i, run] of todo.entries()) {
         const prefix = `Rebuilding ${i + 1} of ${todo.length}`;
         setStatus(`${prefix}…`);
@@ -1391,8 +1394,12 @@ export function TripApp() {
           const overrides: RouteOverrides = { vias: run.vias ?? [], ...(run.turnarounds ? { turnarounds: run.turnarounds } : {}), stops: pinsFor(parsed, stopPins) };
           const result = await routeSheet(parsed, data, overrides, osrmRouter);
           if (!result.ok) throw new Error(result.error);
+          // A run that starts where the last one ended: its first stop is found
+          // on the drive there. Only the drive matching uses it; the router
+          // keeps a run's first stop as the map has it.
+          const firstStopAt = (fromDrive ? startsWhereLastEnded(parsed.stops[0], previousEnd) : null) ?? undefined;
           const vias = (run.vias ?? []).map((v, n) => ({ ...v, ...(result.viaStreets[n] ? { street: result.viaStreets[n] } : {}) }));
-          let drive = fromDrive ? routeFromDrive(parsed, result, fixes, { lines: data.lines, places: data.places }) : null;
+          let drive = fromDrive ? routeFromDrive(parsed, result, fixes, { lines: data.lines, places: data.places, firstStopAt, after: firstStopAt ? previousEndsAt : undefined }) : null;
           if (drive && (drive.start || drive.end)) {
             // Name where the bus set off from and parked, such as the school it waits at.
             const nameOf = async (p?: LonLat) => (p ? placeNear((await loadAround({ lat: p[1], lon: p[0] }).catch(() => ({ places: [] }))).places, p) : undefined);
@@ -1405,9 +1412,12 @@ export function TripApp() {
             for (const [a, b] of [[drive.start, first], [last, drive.end]] as const) {
               if (a && b) lines = mergeMaps({ lines, places: [] }, await loadCorridor(a, b).catch(() => ({ lines: [], places: [] }))).lines;
             }
-            drive = routeFromDrive(parsed, result, fixes, { lines, places: data.places, startName, endName }) ?? drive;
+            drive = routeFromDrive(parsed, result, fixes, { lines, places: data.places, firstStopAt, after: firstStopAt ? previousEndsAt : undefined, startName, endName }) ?? drive;
           }
           if (drive) drivenRuns++;
+          const ended = (drive?.route ?? result).stops.at(-1);
+          previousEnd = ended ? { description: ended.description, lat: ended.lat, lon: ended.lon } : undefined;
+          previousEndsAt = drive?.endsAt;
           rebuilt.set(run.id, { ...savedRunFrom(run.id, run.sheetText, parsed, drive?.route ?? result, vias, false, run.turnarounds, stopPins), area: runArea, driven: !!drive });
         } catch {
           failed++;

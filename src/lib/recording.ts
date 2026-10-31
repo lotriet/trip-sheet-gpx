@@ -57,17 +57,33 @@ export function dwellsOf(fixes: Fix[], minuteOf: (t: number) => number = localMi
 const SURE_M = 150;
 const MOVE_M = 30;
 
+/**
+ * "100 GREEN LEVEL WEST RD": a house number a map finds only to the street,
+ * often far off. Not a campus written with a number ("1 OAK RIDGE MS").
+ */
+export function isAddressStop(description: string | undefined): boolean {
+  const d = (description ?? "").replace(/^\s*deadhead\s*[-–:]\s*/i, "").trim();
+  return /^\d+\s+\S/.test(d) && !/\b(MS|ES|HS|school|elementary|middle|high)\b/i.test(d);
+}
+
 export function stopsFromRecording(
-  stops: { time: string; lat: number; lon: number }[],
+  stops: { time: string; lat: number; lon: number; description?: string }[],
   dwells: Dwell[],
-  unsure: Set<number>,
+  unsureIn: Set<number>,
 ): Record<number, { lat: number; lon: number }> {
+  // A street address is placed by where the bus stood, like a stop the route couldn't pin down.
+  const unsure = new Set(unsureIn);
+  stops.forEach((stop, index) => {
+    if (isAddressStop(stop.description)) unsure.add(index);
+  });
   const pins: Record<number, { lat: number; lon: number }> = {};
   const used = new Set<number>();
   const lateBy: number[] = [];
   let after = -1;
   let delay = 0;
-  const pick = (stop: { lat: number; lon: number }, minute: number, sure: boolean) => {
+  const pick = (stop: { lat: number; lon: number; description?: string }, minute: number, sure: boolean) => {
+    // An address's marker may be far off: when the bus stood there counts, not how near the marker.
+    const perMeter = !sure && isAddressStop(stop.description) ? 1 / 400 : 1 / 40;
     let best: { k: number; score: number } | null = null;
     dwells.forEach((d, k) => {
       if (used.has(k) || (sure && k <= after)) return;
@@ -76,7 +92,7 @@ export function stopsFromRecording(
       // A stop the route placed for sure is where its marker is; a standstill
       // farther off was the bus waiting somewhere else.
       if (late > (sure ? 15 : 8) || m > (sure ? SURE_M : 1000)) return;
-      const score = late + m / 40;
+      const score = late + m * perMeter;
       if (!best || score < best.score) best = { k, score };
     });
     return best as { k: number } | null;
@@ -97,14 +113,20 @@ export function stopsFromRecording(
   stops.forEach((stop, index) => {
     const minute = minutesOf(stop.time);
     if (minute == null || !unsure.has(index)) return;
-    // How late the bus was at the nearest stop before this one it was sure of.
+    // How late the bus was at the nearest stop before this one it was sure
+    // of; for the run's first stops, the nearest one after.
     let k = index;
     while (k > 0 && lateBy[k] == null) k--;
-    delay = lateBy[k] ?? 0;
+    let ahead = index;
+    while (ahead < stops.length && lateBy[ahead] == null) ahead++;
+    delay = lateBy[k] ?? lateBy[ahead] ?? 0;
     const best = pick(stop, minute, false);
     if (!best) return;
     used.add(best.k);
-    pins[index] = { lat: dwells[best.k].lat, lon: dwells[best.k].lon };
+    const at = dwells[best.k];
+    // An address the map placed where the bus stood anyway stays put.
+    if (!unsureIn.has(index) && haversine([stop.lon, stop.lat], [at.lon, at.lat]) <= MOVE_M) return;
+    pins[index] = { lat: at.lat, lon: at.lon };
   });
   return pins;
 }
