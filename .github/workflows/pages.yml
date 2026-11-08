@@ -33,6 +33,9 @@ jobs:
         env:
           NEXT_PUBLIC_MAPBOX_TOKEN: ${{ secrets.MAPBOX_TOKEN }}
           NEXT_PUBLIC_GEOAPIFY_KEY: ${{ secrets.GEOAPIFY_KEY }}
+      # Click through the built page before it goes live.
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:ui
       - uses: actions/upload-pages-artifact@v3
         with:
           path: out

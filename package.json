@@ -10,7 +10,8 @@
     "test": "node --import tsx --test tests/*.test.ts",
     "roads": "tsx scripts/roads.mts",
     "predev": "node scripts/ocr-files.mjs",
-    "prebuild": "node scripts/ocr-files.mjs"
+    "prebuild": "node scripts/ocr-files.mjs",
+    "test:ui": "node --test tests/ui/*.ui.mjs"
   },
   "dependencies": {
     "@base-ui/react": "^1.9.0",
@@ -38,6 +39,7 @@
     "@types/react-dom": "^19",
     "eslint": "^9",
     "eslint-config-next": "16.4.2",
+    "playwright": "1.64.1",
     "tailwindcss": "^4",
     "tsx": "^4.23.15",
     "typescript": "^5"

@@ -1199,6 +1199,7 @@ export function useTripState() {
       : `Remove ${label} from today’s list? This also deletes its saved GPX from this phone.`;
     if (!window.confirm(ask)) return;
     setRuns((prev) => prev.filter((item) => item.id !== run.id));
+    dropStaleNotice();
   }
 
   /** The driver has looked at a run's warnings (or takes them back). */
@@ -1329,6 +1330,12 @@ export function useTripState() {
     const keepNote = kept ? ` ${kept} protected ${kept === 1 ? "run stays" : "runs stay"}.` : "";
     if (!window.confirm(`Remove ${gone} ${gone === 1 ? "run" : "runs"} from today’s list? Their saved GPX files are deleted from this phone.${keepNote}`)) return;
     setRuns((prev) => prev.filter((run) => run.locked));
+    dropStaleNotice();
+  }
+
+  /** A "ready to send" file was made from runs that may now be gone. */
+  function dropStaleNotice() {
+    setGpxNotice((now) => (now && now.state !== "sharing" ? null : now));
   }
 
   function allowBatchExport() {
