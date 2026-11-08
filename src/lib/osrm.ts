@@ -5,12 +5,19 @@
  */
 import type { LonLat } from "./engine/types";
 import type { Router } from "./engine/route";
+import { recall, remember } from "./lookupCache";
 
 const cache = new Map<string, LonLat[] | null>();
 
 export const osrmRouter: Router = async (points) => {
   const path = points.map((p) => `${p[0].toFixed(6)},${p[1].toFixed(6)}`).join(";");
   if (cache.has(path)) return cache.get(path) ?? null;
+  // A leg routed before, kept on the phone: no wait, and it works without signal.
+  const saved = await recall<LonLat[] | null>(`osrm:${path}`, { stale: true });
+  if (saved) {
+    cache.set(path, saved);
+    return saved;
+  }
   const url = `https://router.project-osrm.org/route/v1/driving/${path}?overview=full&geometries=geojson&continue_straight=true`;
   for (let attempt = 0; attempt < 2; attempt++) {
     const ctl = new AbortController();
@@ -21,6 +28,7 @@ export const osrmRouter: Router = async (points) => {
         const json = (await res.json()) as { code?: string; routes?: { geometry?: { coordinates?: LonLat[] } }[] };
         const line = json.code === "Ok" ? (json.routes?.[0]?.geometry?.coordinates ?? null) : null;
         cache.set(path, line);
+        if (line) void remember(`osrm:${path}`, line);
         return line;
       }
     } catch {

@@ -91,8 +91,12 @@ export async function readSheetPhotos(
   onStatus?.("Loading the text reader…");
   const { createWorker, OEM, PSM } = await import("tesseract.js");
   // One worker for the whole batch: loading the reader costs a few seconds.
+  // Full URLs: the worker runs from a blob, where a path like /ocr/ has no base.
+  const ocrDir = new URL(`${process.env.NEXT_PUBLIC_BASE_PATH ?? ""}/ocr/`, location.href).href;
   const worker: Worker = await createWorker("eng", OEM.LSTM_ONLY, {
-    workerPath: `${process.env.NEXT_PUBLIC_BASE_PATH ?? ""}/ocr/worker.min.js`,
+    workerPath: `${ocrDir}worker.min.js`,
+    corePath: ocrDir,
+    langPath: ocrDir.replace(/\/$/, ""),
     logger: (m) => {
       if (m.status === "recognizing text" && typeof m.progress === "number") {
         onStatus?.(`${label()}… ${Math.round(m.progress * 100)}%`);

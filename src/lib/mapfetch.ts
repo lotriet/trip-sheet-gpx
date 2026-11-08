@@ -5,6 +5,7 @@ import { matchPlace } from "./engine/route";
 import { KNOWN_SCHOOLS, WAKE_BBOX } from "./engine/schools";
 import { classifyLocation } from "./engine/parseSheet";
 import type { LonLat, RawAddress, RawLine, RawPlace, Sheet } from "./engine/types";
+import { lookup, recall, remember } from "./lookupCache";
 
 export type MapData = { lines: RawLine[]; places: RawPlace[]; addresses?: RawAddress[] };
 
@@ -34,7 +35,6 @@ async function photon(
   bias: { lat: number; lon: number },
   filter?: { tag?: string; layer?: string },
 ): Promise<PhotonFeature[]> {
-  if (photonDown) return nominatim(query, filter);
   const url = new URL("https://photon.komoot.io/api/");
   url.searchParams.set("q", query);
   if (filter?.tag) url.searchParams.set("osm_tag", filter.tag);
@@ -45,8 +45,10 @@ async function photon(
   url.searchParams.set("lon", String(bias.lon));
   url.searchParams.set("limit", "5");
   const key = url.toString();
-  const hit = photonCache.get(key);
-  if (hit) return hit;
+  // A saved answer first, even once Photon is down: it's what Photon said before.
+  const saved = await recall<PhotonFeature[]>(key);
+  if (saved) return saved;
+  if (photonDown) return nominatim(query, filter);
   // The public geocoder turns away bursts (and then sends no CORS header, so
   // the browser only sees a failed fetch) and sometimes never answers. Space
   // the lookups out, give up on one after a few seconds, and try once more.
@@ -54,12 +56,15 @@ async function photon(
     try {
       const features = await queued(() => fetchJson<{ features?: PhotonFeature[] }>(key, 8000));
       const out = features.features ?? [];
-      photonCache.set(key, out);
+      void remember(key, out);
       return out;
     } catch {
       await sleep(1200 * (attempt + 1));
     }
   }
+  // No signal, or Photon refused: an old answer beats asking another geocoder.
+  const old = await recall<PhotonFeature[]>(key, { stale: true });
+  if (old) return old;
   // Photon can refuse a whole network for hours; ask Nominatim from here on.
   photonDown = true;
   return nominatim(query, filter);
@@ -89,11 +94,7 @@ async function nominatim(query: string, filter?: { tag?: string; layer?: string 
   url.searchParams.set("bounded", "1");
   url.searchParams.set("limit", "10");
   const key = url.toString();
-  let places = nominatimCache.get(key);
-  if (!places) {
-    places = await queued(() => fetchJson<NominatimPlace[]>(key, 10000), NOMINATIM_GAP_MS);
-    nominatimCache.set(key, places);
-  }
+  const places = await lookup(key, () => queued(() => fetchJson<NominatimPlace[]>(key, 10000), NOMINATIM_GAP_MS));
   const [tagKey, tagValue] = filter?.tag?.split(":") ?? [];
   return places
     .filter((p) => !tagKey || (p.category === tagKey && p.type === tagValue))
@@ -138,11 +139,7 @@ async function mapbox(query: string, bias: { lat: number; lon: number }, types =
   url.searchParams.set("limit", "5");
   const key = url.toString();
   url.searchParams.set("access_token", MAPBOX_TOKEN);
-  let features = mapboxCache.get(key);
-  if (!features) {
-    features = (await fetchJson<{ features?: MapboxFeature[] }>(url.toString(), 8000)).features ?? [];
-    mapboxCache.set(key, features);
-  }
+  const features = await lookup(key, async () => (await fetchJson<{ features?: MapboxFeature[] }>(url.toString(), 8000)).features ?? []);
   return features.map((f) => {
     const box = f.properties?.bbox;
     return {
@@ -157,7 +154,6 @@ async function mapbox(query: string, bias: { lat: number; lon: number }, types =
   });
 }
 
-const mapboxCache = new Map<string, MapboxFeature[]>();
 
 const GEOAPIFY_KEY = process.env.NEXT_PUBLIC_GEOAPIFY_KEY ?? "";
 
@@ -178,11 +174,7 @@ async function geoapify(query: string, bias: { lat: number; lon: number }, type?
   url.searchParams.set("limit", "5");
   const key = url.toString();
   url.searchParams.set("apiKey", GEOAPIFY_KEY);
-  let features = geoapifyCache.get(key);
-  if (!features) {
-    features = (await fetchJson<{ features?: GeoapifyFeature[] }>(url.toString(), 8000)).features ?? [];
-    geoapifyCache.set(key, features);
-  }
+  const features = await lookup(key, async () => (await fetchJson<{ features?: GeoapifyFeature[] }>(url.toString(), 8000)).features ?? []);
   return features.map((f) => ({
     geometry: f.geometry,
     properties: {
@@ -194,12 +186,9 @@ async function geoapify(query: string, bias: { lat: number; lon: number }, type?
   }));
 }
 
-const geoapifyCache = new Map<string, GeoapifyFeature[]>();
 
 let photonDown = false;
-const nominatimCache = new Map<string, NominatimPlace[]>();
 const NOMINATIM_GAP_MS = 1100;
-const photonCache = new Map<string, PhotonFeature[]>();
 let lane: Promise<unknown> = Promise.resolve();
 let lastCall = 0;
 const GAP_MS = 400;

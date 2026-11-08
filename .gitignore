@@ -43,3 +43,6 @@ next-env.d.ts
 # local uploads (trip-sheet photos stay off the server)
 /uploads
 /.roads-download.json
+
+# text reader files, copied from node_modules by scripts/ocr-files.mjs
+/public/ocr/

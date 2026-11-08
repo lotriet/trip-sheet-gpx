@@ -6,6 +6,8 @@ The track follows the printed streets **in order**, with the printed turn direct
 
 Photos and sheet text stay in the browser. Nothing is uploaded or stored on a server. The day list is kept in this phone’s browser storage (IndexedDB).
 
+**No signal?** After the page has been opened once, it opens without signal, and the day list, saved runs and road files you've used are still there. Street and school lookups are kept on the phone too, so a run built before can be rebuilt offline. A run with stops it has never looked up needs signal.
+
 ## On the phone
 
 1. Open the page in Safari or Chrome. Add it to the home screen if you want it one tap away.
