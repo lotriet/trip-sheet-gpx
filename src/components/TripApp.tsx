@@ -23,6 +23,7 @@ import { loadDay, saveDay, type SavedRun } from "@/lib/storage";
 import { dwellsOf, recordedFixes, stopsFromRecording } from "@/lib/recording";
 import { useNewVersionReload } from "@/lib/newVersion";
 import { useOfflineSupport } from "@/lib/offline";
+import { cornerInDirection, fixJoinedCorner } from "@/lib/joinedCorner";
 import { placeNear, routeFromDrive, startsWhereLastEnded } from "@/lib/driven";
 import { autoGroup, buildTrips, describePage, dropDuplicatePages, gpxFileName, mergeIntoDay, newTripKey, sheetProblems, sortStopsByTime, splitRuns, type PageInfo, type PageRead, type Trip } from "@/lib/batch";
 import { canShareFiles, sendNativeGpx, shareOrDownload, type TextFile } from "@/lib/shareFiles";
@@ -2177,6 +2178,11 @@ export function TripApp() {
                       onBlur={() => void recheckSoon()}
                     />
                     {stopCheck.label && <p className="mt-1 text-xs text-[#15803d]">On the map: {stopCheck.label}</p>}
+                    {!stop.description.trim() && (
+                      <p role="alert" className="mt-1 rounded-lg bg-[#fef2f2] p-2 text-xs leading-relaxed text-[#7f1d1d]">
+                        This stop has no location. Every stop on the sheet prints one. The reader may have dropped it, or joined it onto a direction (look for a direction that names two streets). Type it the way the sheet prints it.
+                      </p>
+                    )}
                     {stopPlacementWarnings.map((warning, wi) => (
                       <div key={`stop-placement-warning-${wi}`} className="mt-2 rounded-lg border border-[#f0c36d] bg-[#fff6e5] p-2.5 text-sm text-[#7f1d1d]">
                         <p role="alert">Route warning: {warning.message}</p>
@@ -2275,6 +2281,33 @@ export function TripApp() {
                                 ✕
                               </button>
                             {st.label && <p className="col-span-3 px-1 text-[0.7rem] leading-tight text-[#15803d] sm:col-span-4">On the map: {st.label}</p>}
+                            {st.state !== "found" && cornerInDirection(m.street) && (() => {
+                              const fix = fixJoinedCorner(sheet, si, mi);
+                              return (
+                                <div className="col-span-3 rounded-lg border border-[#f0c36d] bg-[#fff6e5] p-2.5 text-xs leading-relaxed text-[#7f1d1d] sm:col-span-4" data-joined-corner>
+                                  <p role="alert">
+                                    A direction names one street, but this one names two. The reader probably joined a stop&apos;s location ({cornerInDirection(m.street)!.corner}) onto this direction.
+                                  </p>
+                                  {fix && (
+                                    <>
+                                      <p className="mt-1 text-[#3d4b63]">{fix.says}</p>
+                                      <Button
+                                        type="button"
+                                        variant="outline"
+                                        className="mt-2 h-9 border-[#d9d2c3] bg-white text-xs text-[#142033]"
+                                        onClick={() => {
+                                          setSheet(fix.sheet);
+                                          setSuggestFor(null);
+                                          void recheckSoon();
+                                        }}
+                                      >
+                                        Fix it
+                                      </Button>
+                                    </>
+                                  )}
+                                </div>
+                              );
+                            })()}
                             {editWarnings.filter((w) => w.stopIndex === si && w.maneuverIndex === mi).map((w, wi) => (
                               <div key={`route-warning-${wi}`} className="col-span-3 rounded-lg border border-[#f0c36d] bg-[#fff6e5] p-2.5 text-sm text-[#7f1d1d] sm:col-span-4">
                                 <p role="alert">Route warning: {w.message}</p>

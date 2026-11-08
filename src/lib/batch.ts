@@ -11,6 +11,7 @@ import { schoolSig } from "./engine/names";
 import { editDistance } from "./engine/route";
 import { classifyLocation, parseSheet, ROUTE_HEADING, RUN_HEADING } from "./engine/parseSheet";
 import type { Sheet, Stop } from "./engine/types";
+import { cornerInDirection } from "./joinedCorner";
 
 /** One page of text: a photo, part of a photo, or pasted text. `photo` is -1 for pasted text. */
 export type PageRead = {
@@ -407,6 +408,10 @@ export function sheetProblems(trips: Trip[]): string[] {
     stops.forEach((stop, i) => {
       if (!minutesOf(stop.time)) out.push(`${label}, stop ${i + 1} (${stop.description || "no name"}) has no time.`);
       if (!stop.description.trim()) out.push(`${label}, stop ${i + 1} at ${stop.time} has no name.`);
+      for (const m of stop.maneuvers) {
+        const joined = cornerInDirection(m.street);
+        if (joined) out.push(`${label}, stop ${i + 1}: the direction "${m.street}" names two streets. It is probably the stop ${joined.corner} joined onto the direction ${joined.street}.`);
+      }
     });
     // Building sorts stops by time, so look at the order they were printed in.
     const printed = parseSheet(trip.text).stops;
