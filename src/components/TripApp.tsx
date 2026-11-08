@@ -23,6 +23,7 @@ import { loadDay, saveDay, type SavedRun } from "@/lib/storage";
 import { dwellsOf, recordedFixes, stopsFromRecording } from "@/lib/recording";
 import { useNewVersionReload } from "@/lib/newVersion";
 import { useOfflineSupport } from "@/lib/offline";
+import { useAppBridge } from "@/lib/appBridge";
 import { cornerInDirection, fixJoinedCorner } from "@/lib/joinedCorner";
 import { placeNear, routeFromDrive, startsWhereLastEnded } from "@/lib/driven";
 import { autoGroup, buildTrips, describePage, dropDuplicatePages, gpxFileName, mergeIntoDay, newTripKey, sheetProblems, sortStopsByTime, splitRuns, type PageInfo, type PageRead, type Trip } from "@/lib/batch";
@@ -241,6 +242,7 @@ export function TripApp() {
     JSON.stringify(currentDraft.warnings) === JSON.stringify(editWarnings);
   const editingRun = editingId ? runs.find((run) => run.id === editingId) : undefined;
   useOfflineSupport();
+  const bridge = useAppBridge();
   useNewVersionReload(view === "day" && !draftActive && !routeBuilding && !rebuilding && !exportingDay && !checking);
   // A run opened to move its turnaround is built once its sheet and map settings are in place.
   const pendingBuild = useRef(false);
@@ -1656,6 +1658,16 @@ export function TripApp() {
           </div>
         </details>
       </header>
+      {bridge === "old-app" && (
+        <p role="alert" className="border-b border-[#f0c36d] bg-[#fff6e5] px-4 py-2.5 text-sm leading-snug text-[#7f1d1d]">
+          GPX Nav on this phone is older than this trip sheet page. Routes you send may not arrive. Update the app, then open the trip sheet again.
+        </p>
+      )}
+      {bridge === "update-waiting" && (
+        <p role="status" className="border-b border-[#d9e0ea] bg-[#eef3fa] px-4 py-2.5 text-sm leading-snug text-[#17243a]">
+          A newer trip sheet page is out, but it needs a newer GPX Nav. This page keeps working until you update the app.
+        </p>
+      )}
 
           {!stored && <p className="bg-[#fff4d6] px-4 py-2 text-sm font-medium text-[#714b08]" role="alert">This phone couldn’t save the latest changes. Check storage before leaving this page.</p>}
           {draftStorageError && (

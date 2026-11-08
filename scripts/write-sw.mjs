@@ -36,4 +36,11 @@ const sw = template
   .replace("__VERSION__", JSON.stringify(`${Date.now()}-${version}`))
   .replace("__PRECACHE__", JSON.stringify(precache, null, 1));
 writeFileSync(join(out, "sw.js"), sw);
+
+// The deploy check: open pages compare this with the build they run, and
+// GPX Nav holds back from a page that needs a newer app (src/lib/appBridge.ts).
+const bridge = readFileSync(join(root, "src", "lib", "appBridge.ts"), "utf8").match(/APP_BRIDGE_MIN = (\d+)/);
+if (!bridge) throw new Error("APP_BRIDGE_MIN not found in src/lib/appBridge.ts");
+const build = process.env.GITHUB_SHA ?? "dev";
+writeFileSync(join(out, "version.json"), JSON.stringify({ build, minAppBridge: Number(bridge[1]) }));
 console.log(`Wrote out/sw.js: ${precache.length} files saved for offline use (build ${version})`);

@@ -1,3 +1,4 @@
+import { PAGE_BRIDGE } from "./appBridge";
 /**
  * Read photos of trip sheets in the browser. Photos are never uploaded.
  *
@@ -150,7 +151,7 @@ async function recognizeNatively(file: Blob): Promise<NativeOcrLine[] | null> {
     }, 60000);
     nativeOcrPending.set(id, (lines) => { clearTimeout(timeout); resolve(lines); });
   });
-  window.TripNavNativeOCR?.postMessage(JSON.stringify({ id, data: btoa(binary) }));
+  window.TripNavNativeOCR?.postMessage(JSON.stringify({ id, data: btoa(binary), bridge: PAGE_BRIDGE }));
   return response;
 }
 

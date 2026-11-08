@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import { appBridge, inApp } from "./appBridge";
 
 /** The commit this page was built from; each deploy writes the live one to version.json. */
 const BUILD = process.env.NEXT_PUBLIC_BUILD_ID ?? "";
@@ -22,8 +23,14 @@ export function useNewVersionReload(idle: boolean) {
       checking = true;
       try {
         const res = await fetch(`${BASE}/version.json`, { cache: "no-store" });
-        const live = res.ok ? ((await res.json()) as { build?: string }).build : undefined;
+        const info = res.ok ? ((await res.json()) as { build?: string; minAppBridge?: number }) : {};
+        const live = info.build;
         if (!live || live === BUILD || !idleNow.current) return;
+        // Inside GPX Nav, don't move to a page the installed app can't talk to.
+        if (inApp() && (info.minAppBridge ?? 0) > appBridge()) {
+          window.dispatchEvent(new Event("tripnav-update-waiting"));
+          return;
+        }
         // Once per version: if the browser keeps serving the old page, don't loop.
         if (sessionStorage.getItem("reloadedFor") === live) return;
         sessionStorage.setItem("reloadedFor", live);

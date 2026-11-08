@@ -3,6 +3,8 @@
  * share files (iPhone Safari, Android Chrome), otherwise one download per file.
  */
 
+import { PAGE_BRIDGE } from "./appBridge";
+
 export type TextFile = { name: string; text: string };
 
 declare global {
@@ -13,7 +15,7 @@ declare global {
 
 export function sendNativeGpx(files: TextFile[], close = true): boolean {
   if (typeof window === "undefined" || !window.TripNavGPX) return false;
-  window.TripNavGPX.postMessage(JSON.stringify({ files, close }));
+  window.TripNavGPX.postMessage(JSON.stringify({ files, close, bridge: PAGE_BRIDGE }));
   return true;
 }
 
