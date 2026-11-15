@@ -803,6 +803,15 @@ export type Router = (points: LonLat[]) => Promise<LonLat[] | null>;
 
 const JUMP_NOTE = "Couldn't connect";
 
+/** A gap the road router crosses for longer than this is worth a look. */
+export const ROUTER_CHECK_METERS = 400;
+
+/** "0.6 mi", or "900 ft" under a tenth of a mile. */
+function routerDistance(meters: number): string {
+  const miles = meters / 1609.344;
+  return miles >= 0.1 ? `${miles.toFixed(1)} mi` : `${Math.round(meters * 3.281 / 50) * 50} ft`;
+}
+
 
 async function routeFrom(
   graph: Graph,
@@ -906,12 +915,18 @@ async function routeFrom(
     heading = line.length >= 2 && !sameCorner ? arrivalHeading(line) : heading;
     roughHeading = true;
     if (!sameCorner) {
+      // A long way chosen by the router may not be the printed streets: it
+      // takes the quickest roads. Said as a warning, where the driver sees
+      // it; a short hop over the gap stays a note (audit, 15 Nov 2026).
+      const routed = path ? polylineMeters(path) : 0;
       warn(
-        path ? "info" : "warn",
+        path && routed <= ROUTER_CHECK_METERS ? "info" : "warn",
         stopIndex,
         maneuverIndex,
         path
-          ? `The map tiles have a gap before ${label}; the road router joined it.`
+          ? routed <= ROUTER_CHECK_METERS
+            ? `The map tiles have a gap before ${label}; the road router joined it.`
+            : `The map has a gap before ${label}; the road router chose the way for ${routerDistance(routed)}. Check it follows the printed streets.`
           : `${JUMP_NOTE} to ${label} on the map. The track draws a straight line here. Check it.`,
       );
     }
