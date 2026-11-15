@@ -179,6 +179,16 @@ export function buildGraph(input: GraphLine[], linkKeys?: Set<string>, meets?: S
   }
   const moves = new Map<string, LonLat>();
   const vid = (pi: number, vi: number) => `${pi}:${vi}`;
+  // Whether a point is exactly on a vertex inside another line.
+  const onMiddle = (c: LonLat, pi: number) => {
+    for (const ck of nearbyKeys(c)) {
+      for (const v of vertGrid.get(ck) ?? []) {
+        if (v.pi === pi || v.vi === 0 || v.vi === pls[v.pi].coords.length - 1) continue;
+        if (haversine(c, pls[v.pi].coords[v.vi]) < 0.05) return true;
+      }
+    }
+    return false;
+  };
   for (let pi = 0; pi < pls.length; pi++) {
     const coords = pls[pi].coords;
     for (const vi of [0, coords.length - 1]) {
@@ -202,7 +212,15 @@ export function buildGraph(input: GraphLine[], linkKeys?: Set<string>, meets?: S
       const bId = vid(best.pi, best.vi);
       const bCoord = moves.get(bId) ?? pls[best.pi].coords[best.vi];
       const bIsEnd = best.vi === 0 || best.vi === pls[best.pi].coords.length - 1;
-      if (!bIsEnd || moves.has(bId)) {
+      if (bIsEnd && !moves.has(bId) && onMiddle(end, pi)) {
+        // Two ends at a corner where one already sits on the middle of
+        // another road: meeting halfway pulled both off it, so a side street
+        // came off a divided road and the route ran past the turn and back
+        // (audit, 15 Nov 2026). The other end comes here instead.
+        moves.set(bId, [end[0], end[1]]);
+      } else if (bIsEnd && !moves.has(bId) && onMiddle(bCoord, best.pi)) {
+        moves.set(id, [bCoord[0], bCoord[1]]);
+      } else if (!bIsEnd || moves.has(bId)) {
         moves.set(id, [bCoord[0], bCoord[1]]);
       } else {
         const mid: LonLat = [(end[0] + bCoord[0]) / 2, (end[1] + bCoord[1]) / 2];
