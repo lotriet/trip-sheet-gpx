@@ -446,7 +446,7 @@ export function EditScreen() {
               </div>
             )}
             {renderUndoToast()}
-            <div className="fixed inset-x-0 bottom-0 z-[1200] border-t border-[#dce3ec] bg-white p-3 shadow-[0_-8px_28px_rgba(24,39,62,0.12)]">
+            <div data-action-bar className="fixed inset-x-0 bottom-0 z-[1200] border-t border-[#dce3ec] bg-white p-3 shadow-[0_-8px_28px_rgba(24,39,62,0.12)]">
               <div className="mx-auto flex max-w-2xl flex-col gap-2">
                 {routeBuilding ? <RouteBuildStatus message={status} /> : status && <p className="text-sm font-medium">{status}</p>}
                 {error && <p className="text-sm text-[#7f1d1d]" role="alert">{error}</p>}

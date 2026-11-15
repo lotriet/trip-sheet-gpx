@@ -190,7 +190,7 @@ export function DayScreen() {
                         return stop ? [{ lat: stop.lat, lon: stop.lon, label: w.message }] : [];
                       })}
                     />
-                    <p className="mt-1 text-sm text-[#3d4b63]">Red circles mark warnings. L, R and U pins are the turns (amber: not confirmed). Blue dots are via points.</p>
+                    <p className="mt-1 text-sm text-[#3d4b63]">Red circles mark warnings. L, R and U pins are the turns: zoom in to see them (amber ones, not confirmed, always show). Blue dots are via points.</p>
                   </div>
                 )}
                 <div className="mt-3 grid grid-cols-3 gap-1.5 border-t border-[#edf0f4] pt-2.5">
@@ -244,7 +244,7 @@ export function DayScreen() {
                 </Button>
               </div>
             )}
-            <div className="fixed inset-x-0 bottom-0 z-[1200] border-t border-[#dce3ec] bg-white p-3 shadow-[0_-8px_28px_rgba(24,39,62,0.12)]">
+            <div data-action-bar className="fixed inset-x-0 bottom-0 z-[1200] border-t border-[#dce3ec] bg-white p-3 shadow-[0_-8px_28px_rgba(24,39,62,0.12)]">
               <div className="mx-auto flex max-w-2xl flex-col gap-2">
                 <Button type="button" className="h-11 rounded-xl bg-[#173b64] text-sm font-bold text-white shadow-sm" onClick={openNew} disabled={exportingDay}>
                   Add a run

@@ -9,6 +9,38 @@
   max-height: none !important;
 }
 
+/*
+ * A phone on its side: each screen's bottom bar puts its buttons in one slim
+ * row. Stacked, they covered most of a 390 px tall screen, and the route
+ * map did not show (UI audit, 15 Nov 2026). Notes wrap onto their own line.
+ */
+@media (max-height: 500px) and (orientation: landscape) {
+  [data-action-bar] {
+    padding-top: 6px;
+    padding-bottom: 6px;
+  }
+  [data-action-bar] > div {
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+  }
+  [data-action-bar] > div > button {
+    flex: 1 1 0;
+    min-width: 0;
+  }
+  [data-action-bar] > div > .grid {
+    flex: 2 1 0;
+    min-width: 0;
+  }
+  [data-action-bar] > div > :not(button):not(.grid) {
+    flex-basis: 100%;
+  }
+  [data-action-bar] button {
+    height: 2.25rem;
+  }
+}
+
 @custom-variant dark (&:is(.dark *));
 
 @theme inline {

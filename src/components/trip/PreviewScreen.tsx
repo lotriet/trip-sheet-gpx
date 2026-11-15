@@ -180,7 +180,7 @@ export function PreviewScreen() {
                 })}
               </ol>
             </details>
-            <p className="text-sm text-[#3d4b63]">Blue dots are required route points. Orange dots are turnarounds: drag one to where the bus turns around, and the route rebuilds. Tap a warning above to fix a direction or guide the route.</p>
+            <p className="text-sm text-[#3d4b63]">Zoom in to see each turn (L, R, U). Blue dots are required route points. Orange dots are turnarounds: drag one to where the bus turns around, and the route rebuilds. Tap a warning above to fix a direction or guide the route.</p>
             {(overrides.vias?.length ?? 0) > 0 && (
               <p className="text-sm font-medium">
                 This track passes through {overrides.vias?.map((v, n) => v.street || `waypoint ${n + 1}`).join(", ")}. The blue {overrides.vias?.length === 1 ? "dot is" : "dots are"} on the map.
@@ -227,7 +227,7 @@ export function PreviewScreen() {
               </ul>
             )}
             {renderUndoToast()}
-            <div className="fixed inset-x-0 bottom-0 z-[1200] border-t border-[#dce3ec] bg-white p-3 shadow-[0_-8px_28px_rgba(24,39,62,0.12)]">
+            <div data-action-bar className="fixed inset-x-0 bottom-0 z-[1200] border-t border-[#dce3ec] bg-white p-3 shadow-[0_-8px_28px_rgba(24,39,62,0.12)]">
               <div className="mx-auto flex max-w-2xl flex-col gap-2">
                 {routeBuilding && <RouteBuildStatus message={status} />}
                 {tapMode !== null ? (

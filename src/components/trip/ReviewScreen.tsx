@@ -110,7 +110,7 @@ export function ReviewScreen() {
                 ))}
               </div>
             )}
-            <div className="fixed inset-x-0 bottom-0 z-[1200] border-t border-[#dce3ec] bg-white p-3 shadow-[0_-8px_28px_rgba(24,39,62,0.12)]">
+            <div data-action-bar className="fixed inset-x-0 bottom-0 z-[1200] border-t border-[#dce3ec] bg-white p-3 shadow-[0_-8px_28px_rgba(24,39,62,0.12)]">
               <div className="mx-auto flex max-w-lg flex-col gap-2">
                 {status && <p className="text-sm font-medium">{status}</p>}
                 <div className="flex gap-2">

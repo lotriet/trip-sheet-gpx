@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { CircleMarker, MapContainer, Marker, Polyline, Popup, TileLayer, useMap, useMapEvents } from "react-leaflet";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
@@ -39,6 +39,19 @@ function FocusArea({ points }: { points?: LonLat[] }) {
       animate: false,
     });
   }, [map, points]);
+  return null;
+}
+
+/**
+ * Confirmed turn pins show from this zoom in. Further out they sat on top of
+ * the stop numbers and each other (UI audit, 15 Nov 2026); amber ones, the
+ * turns to check, show at every zoom.
+ */
+export const TURN_PINS_FROM_ZOOM = 15;
+
+function ZoomWatch({ onZoom }: { onZoom: (zoom: number) => void }) {
+  const map = useMapEvents({ zoomend: () => onZoom(map.getZoom()) });
+  useEffect(() => onZoom(map.getZoom()), [map, onZoom]);
   return null;
 }
 
@@ -115,6 +128,7 @@ export default function RouteMap({
   /** When set, turnaround pins can be dragged; called where one is dropped. */
   onMoveTurnaround?: (id: string, lat: number, lon: number) => void;
 }) {
+  const [zoom, setZoom] = useState(13);
   const center: [number, number] = coords.length
     ? [coords[Math.floor(coords.length / 2)][1], coords[Math.floor(coords.length / 2)][0]]
     : [35.8, -78.78];
@@ -128,17 +142,18 @@ export default function RouteMap({
       <FocusPoint point={focusPoint} />
       <FocusArea points={focusArea} />
       <Clicks onClick={onMapClick} />
+      <ZoomWatch onZoom={setZoom} />
       {coords.length > 1 && (
         <Polyline positions={coords.map((c) => [c[1], c[0]] as [number, number])} pathOptions={{ color: "#0f2744", weight: 5, opacity: 0.9 }} />
       )}
       {highlightedLines.map((line, i) => line.length > 1 && (
         <Polyline key={`highlight-${i}`} positions={line.map(([lon, lat]) => [lat, lon] as [number, number])} pathOptions={{ color: "#e11d48", weight: 8, opacity: 0.95, dashArray: "8 8" }} />
       ))}
-      {turns.map((t, i) => (
+      {turns.map((t, i) => (t.confirmed && zoom < TURN_PINS_FROM_ZOOM ? null : (
         <Marker key={`turn-${i}-${t.lat}-${t.lon}`} position={[t.lat, t.lon]} icon={turnIcon(t)} title={t.label}>
           <Popup>{t.confirmed ? t.label : `${t.label} — not confirmed at a clear intersection; check it against the sheet.`}</Popup>
         </Marker>
-      ))}
+      )))}
       {stops.map((s, i) => (
         <Marker key={`${s.lat}-${s.lon}-${i}`} position={[s.lat, s.lon]} icon={numberIcon(i + 1)} title={s.label} />
       ))}

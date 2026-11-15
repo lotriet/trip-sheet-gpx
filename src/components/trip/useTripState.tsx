@@ -850,6 +850,10 @@ export function useTripState() {
       return;
     }
     if (!warningAdvanceRef.current) setWarningCursor(0);
+    // From the editor, the new route opens at its top: the map and its
+    // summary. It kept the editor's scroll and opened part way down the list
+    // (UI audit, 15 Nov 2026). A rebuild on the route screen keeps its place.
+    const fromEditor = view !== "preview";
     setRouteBuilding(true);
     setStatus("Building the route…");
     try {
@@ -873,6 +877,7 @@ export function useTripState() {
           return street ? { lat: v.lat, lon: v.lon, street } : { lat: v.lat, lon: v.lon };
         }),
       });
+      if (fromEditor) scrollRestoreRef.current = 0;
       setView("preview");
       setStatus("");
     } catch (err) {
