@@ -7,7 +7,9 @@ import {
   minDistToLine,
   nearestIndex,
   polylineMeters,
+  exitsOffRings,
   projectPoint,
+  roundaboutRings,
   roundaboutWays,
   turnsAtCorners,
   turnAngle,
@@ -1334,8 +1336,10 @@ async function routeFrom(
     );
   }
 
+  const rings = roundaboutRings(allRoads.get(graph) ?? []);
+  exitsOffRings(coords, turnMarks, rings);
   // Place stops along the finished track.
-  const placement = placeStops(sheet, coords, anchors, turnMarks, graph, available, places, addresses, overrides.stops);
+  const placement = placeStops(sheet, coords, anchors, turnMarks, graph, available, places, addresses, overrides.stops, rings);
   warnings.push(...placement.warnings);
   const meters = polylineMeters(coords);
   roundaboutWays(coords, turnMarks);
@@ -1461,6 +1465,7 @@ function placeStops(
   places: RawPlace[],
   addresses: RawAddress[],
   pins: RouteOverrides["stops"] = {},
+  rings: LonLat[][] = [],
 ): { stops: RouteSuccess["stops"]; warnings: Warning[] } {
   const out: RouteSuccess["stops"] = [];
   const warnings: Warning[] = [];
@@ -1476,6 +1481,26 @@ function placeStops(
     }
     return { from: Math.min(from, to), to };
   };
+  // "OAK ST & ROUNDABOUT": the bus stops on the ring where Oak St meets it.
+  // It was pinned at the turn in, 220 m away (audit, 15 Nov 2026).
+  const onRing = (p: LonLat) => rings.some((r) => minDistToLine(p, r).d <= 3);
+  const ringSpot = (index: number, street: string): number | null => {
+    if (!rings.length) return null;
+    const key = resolveTarget(street, available, places).key;
+    // Not the ring's own pieces, which may carry the street's name.
+    const lines = key ? graph.edges.filter((e) => edgeHas(e, key) && !onRing(e.coords[Math.floor(e.coords.length / 2)])).map((e) => e.coords) : [];
+    if (!lines.length) return null;
+    const { from, to } = windowFor(index);
+    let best = { at: -1, d: Infinity };
+    for (let k = from; k <= to; k++) {
+      if (!onRing(track[k])) continue;
+      for (const l of lines) {
+        const d = minDistToLine(track[k], l).d;
+        if (d < best.d) best = { at: k, d };
+      }
+    }
+    return best.d <= 40 ? best.at : null;
+  };
   sheet.stops.forEach((stop, index) => {
     const loc = classifyLocation(stop.description);
     let coord: LonLat = track[Math.min(minAt, track.length - 1)] ?? track[0];
@@ -1483,6 +1508,7 @@ function placeStops(
     let placed = index === 0;
 
     const pin = index > 0 ? pins[index] : undefined;
+    const ring = loc.kind === "street" && /\b(?:roundabout|traffic circle|rotary)\b/i.test(stop.description) ? ringSpot(index, loc.street) : null;
     if (index === 0) {
       coord = track[0];
       at = 0;
@@ -1573,6 +1599,10 @@ function placeStops(
       } else {
         warnings.push({ level: "warn", stopIndex: index, maneuverIndex: -1, message: `The route doesn't pass the address for stop “${stop.description}”. Its marker is approximate; check it on the map.` });
       }
+    } else if (ring !== null) {
+      at = ring;
+      coord = track[at];
+      placed = true;
     } else if (index > 0) {
       warnings.push({ level: "warn", stopIndex: index, maneuverIndex: -1, message: `Stop “${stop.description}” gives only a street name, so its exact position along the street is unknown. Check this stop marker.` });
     }

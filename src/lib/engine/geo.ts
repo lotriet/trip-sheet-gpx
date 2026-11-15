@@ -62,6 +62,43 @@ export function roundaboutWay(track: LonLat[], k: number): "left" | "right" | "p
   return angle > 45 ? "right" : angle < -45 ? "left" : "proceed";
 }
 
+/**
+ * Roundabout rings on the map: a one-way way that closes on itself, small
+ * enough to be a roundabout rather than a one-way loop round a block.
+ */
+export function roundaboutRings(lines: { coords: LonLat[]; oneway: number }[]): LonLat[][] {
+  return lines
+    .filter((l) => l.oneway !== 0 && l.coords.length >= 4 && haversine(l.coords[0], l.coords[l.coords.length - 1]) < 1 && polylineMeters(l.coords) <= 500)
+    .map((l) => l.coords);
+}
+
+/**
+ * A roundabout exit is where the bus leaves the ring. When the bus comes in
+ * on the street it leaves on, the exit was marked where it already was, up to
+ * 100 m before the ring, and read the wrong way (audit, 15 Nov 2026). Such a
+ * mark moves on to the last point of the ring ahead, if one is within 400 m
+ * and before the next mark.
+ */
+export function exitsOffRings<T extends { trackIndex: number; via?: string }>(track: LonLat[], marks: T[], rings: LonLat[][]): T[] {
+  if (!rings.length) return marks;
+  const onRing = (p: LonLat, within: number) => rings.some((r) => minDistToLine(p, r).d <= within);
+  marks.forEach((mark, m) => {
+    if (mark.via !== "roundabout" || mark.trackIndex < 0 || mark.trackIndex >= track.length) return;
+    if (onRing(track[mark.trackIndex], 15)) return;
+    const limit = marks.slice(m + 1).reduce((lo, next) => (next.trackIndex > mark.trackIndex ? Math.min(lo, next.trackIndex) : lo), track.length - 1);
+    let run = 0;
+    let exit = -1;
+    for (let i = mark.trackIndex + 1; i <= limit; i++) {
+      run += haversine(track[i - 1], track[i]);
+      if (onRing(track[i], 3)) exit = i;
+      else if (exit >= 0) break;
+      if (exit < 0 && run > 400) break;
+    }
+    if (exit >= 0) mark.trackIndex = exit;
+  });
+  return marks;
+}
+
 /** Roundabout exits take their way from the track (see roundaboutWay). */
 export function roundaboutWays<T extends { trackIndex: number; kind: string; via?: string }>(track: LonLat[], marks: T[]): T[] {
   for (const mark of marks) {
