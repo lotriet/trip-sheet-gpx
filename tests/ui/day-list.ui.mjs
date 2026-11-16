@@ -103,3 +103,11 @@ test("Discard a draft: Cancel keeps it, OK deletes it", async () => {
   const left = await page.evaluate(() => JSON.parse(localStorage.getItem("trip-sheet-gpx-editor-drafts-v1") ?? "[]").length);
   assert.equal(left, 0);
 });
+
+test("the rebuild and recorded-drive tools are folded away until asked for", async () => {
+  const match = page.getByText("Match stops to a recorded drive", { exact: true });
+  assert.equal(await match.isVisible(), false);
+  await page.getByText("Rebuild, or use a recorded drive").click();
+  assert.equal(await match.isVisible(), true);
+  assert.equal(await page.getByLabel("Use a recorded drive as the route").count(), 1);
+});

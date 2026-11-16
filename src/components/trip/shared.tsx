@@ -71,6 +71,14 @@ export const KIND_LABEL: Record<ManeuverKind, string> = {
   turnaround: "Turn around on",
 };
 
+/** The same, short enough to sit beside the street on a phone. */
+export const SHORT_KIND: Record<ManeuverKind, string> = {
+  proceed: "Proceed",
+  left: "Left",
+  right: "Right",
+  turnaround: "U-turn",
+};
+
 export function ManeuverArrow({ kind }: { kind: ManeuverKind }) {
   const Icon = kind === "left"
     ? CornerUpLeft

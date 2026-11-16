@@ -70,3 +70,37 @@ test("on a phone on its side, the buttons sit in one slim row", async () => {
   assert.ok(Math.abs(add - edit) < 2, "on its side, one row");
   assert.ok((await bar.boundingBox()).height < 70, `bar ${(await bar.boundingBox()).height} px tall`);
 });
+
+test("notes about the map are folded under one line", async () => {
+  const notes = page.locator("[data-route-notes]");
+  assert.match(await notes.locator("summary").textContent(), /^\d+ notes? about the map$/);
+  const first = notes.locator("summary + div > div").first();
+  assert.equal(await first.isVisible(), false);
+  await notes.locator("summary").click();
+  assert.equal(await first.isVisible(), true);
+});
+
+test("on a phone, each direction keeps its street on the same line", async () => {
+  await page.getByRole("button", { name: "Edit directions" }).click();
+  const rows = page.locator("[data-direction-row]");
+  await rows.first().waitFor();
+  const n = await rows.count();
+  assert.ok(n > 3);
+  for (let i = 0; i < n; i++) {
+    const row = rows.nth(i);
+    const kind = await row.getByRole("combobox", { name: "Direction" }).boundingBox();
+    const street = await row.getByRole("textbox", { name: "Street" }).boundingBox();
+    assert.ok(Math.abs(kind.y - street.y) < 8, `row ${i}: direction at ${kind.y}, street at ${street.y}`);
+  }
+  // The stop's number, time and delete on one line too.
+  const time = await page.getByRole("textbox", { name: "Stop time" }).first().boundingBox();
+  const remove = await page.getByRole("button", { name: "Delete stop 1" }).boundingBox();
+  assert.ok(Math.abs(time.y + time.height / 2 - (remove.y + remove.height / 2)) < 4);
+});
+
+test("the photo and file buttons say what they do", async () => {
+  await page.goto(site.url);
+  await page.getByRole("button", { name: "Add a run" }).click();
+  assert.equal(await page.getByLabel("Take photos of the trip sheet").count(), 1);
+  assert.equal(await page.getByLabel("Choose photos, a PDF or a text file of the trip sheet").count(), 1);
+});

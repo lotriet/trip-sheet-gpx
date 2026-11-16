@@ -5,7 +5,7 @@ import { EXAMPLE_SHEET_TEXT } from "@/lib/exampleSheet";
 import type { ManeuverKind } from "@/lib/engine/types";
 import { canonicalKey } from "@/lib/engine/names";
 import { cornerInDirection, fixJoinedCorner } from "@/lib/joinedCorner";
-import { RouteMap, nearbyStreetLines, KINDS, KIND_LABEL, ManeuverArrow, RouteBuildStatus, WrapField, Tucked, PageThumbs, SuggestPanel, StreetMark } from "./shared";
+import { RouteMap, nearbyStreetLines, KINDS, KIND_LABEL, SHORT_KIND, ManeuverArrow, RouteBuildStatus, WrapField, Tucked, PageThumbs, SuggestPanel, StreetMark } from "./shared";
 import { useTrip } from "./useTripState";
 
 /** One run's sheet: stops, directions, and the map checks on each name. */
@@ -131,11 +131,11 @@ export function EditScreen() {
             {!reviewTrip && <div className="grid grid-cols-2 gap-2">
               <label className="flex h-12 cursor-pointer items-center justify-center rounded-lg bg-[#0f2744] text-sm font-medium text-white">
                 Take photos
-                <input className="sr-only" type="file" accept="image/*,.heic,.heif" capture="environment" multiple onChange={(e) => void onPhotos(e.currentTarget)} />
+                <input className="sr-only" type="file" aria-label="Take photos of the trip sheet" accept="image/*,.heic,.heif" capture="environment" multiple onChange={(e) => void onPhotos(e.currentTarget)} />
               </label>
               <label className="flex h-12 cursor-pointer items-center justify-center rounded-lg bg-white text-sm font-medium ring-1 ring-[#d9d2c3]">
                 Photos, PDF or text
-                <input className="sr-only" type="file" accept="image/*,.heic,.heif,application/pdf,.pdf,.md,.markdown,.txt,text/plain,text/markdown" multiple onChange={(e) => void onPhotos(e.currentTarget)} />
+                <input className="sr-only" type="file" aria-label="Choose photos, a PDF or a text file of the trip sheet" accept="image/*,.heic,.heif,application/pdf,.pdf,.md,.markdown,.txt,text/plain,text/markdown" multiple onChange={(e) => void onPhotos(e.currentTarget)} />
               </label>
             </div>}
             <label className="text-sm font-medium">
@@ -203,21 +203,21 @@ export function EditScreen() {
                   const stopPlacementWarnings = editWarnings.filter((w) => w.stopIndex === si && w.maneuverIndex < 0);
                   return (
                     <div key={si} className="rounded-2xl border border-[#dce3ec] border-l-[3px] border-l-[#315d8c] bg-white p-3 shadow-[0_3px_12px_rgba(24,39,62,0.06)]" data-stop={si}>
-                      <div className="mb-2 flex items-center justify-between gap-2 border-b border-[#ece7dc] pb-1.5">
-                        <p className="rounded-full bg-[#e9eff7] px-2.5 py-1 text-xs font-bold tracking-wide text-[#0f2744]">STOP {si + 1}</p>
+                      {/* One line for the stop's number, time, check and delete:
+                          the editor ran a phone screen per stop (UI audit, 15 Nov 2026). */}
+                      <div className="flex items-center gap-2">
+                        <p className="shrink-0 rounded-full bg-[#e9eff7] px-2.5 py-1 text-xs font-bold tracking-wide text-[#0f2744]">STOP {si + 1}</p>
+                        <Input className="h-9 w-28 shrink-0 bg-white text-sm" value={stop.time} aria-label="Stop time" onChange={(e) => setSheet({ ...sheet, stops: sheet.stops.map((s, i) => (i === si ? { ...s, time: e.target.value } : s)) })} />
+                        <StreetMark state={stopCheck.state} open={suggestFor === sid} onTap={() => void tapMark(sid, stopCheck.missing)} />
                         <button
                           type="button"
-                          className="flex h-9 w-9 touch-manipulation items-center justify-center rounded-lg text-[#8f2c1c] hover:bg-[#fbeaea]"
+                          className="ml-auto flex h-9 w-9 shrink-0 touch-manipulation items-center justify-center rounded-lg text-[#8f2c1c] hover:bg-[#fbeaea]"
                           aria-label={`Delete stop ${si + 1}`}
                           title="Delete stop (you can undo)"
                           onClick={() => deleteStop(si)}
                         >
                           <Trash2 className="h-4 w-4" aria-hidden />
                         </button>
-                      </div>
-                      <div className="flex items-end gap-2">
-                        <Input className="h-9 w-28 shrink-0 bg-white text-sm" value={stop.time} aria-label="Stop time" onChange={(e) => setSheet({ ...sheet, stops: sheet.stops.map((s, i) => (i === si ? { ...s, time: e.target.value } : s)) })} />
-                        <StreetMark state={stopCheck.state} open={suggestFor === sid} onTap={() => void tapMark(sid, stopCheck.missing)} />
                       </div>
                       <WrapField
                         className="mt-1 border-[#c9c1b2]"
@@ -284,7 +284,7 @@ export function EditScreen() {
                         <span className="text-[0.68rem] font-bold uppercase tracking-[0.12em] text-[#596579]">Directions</span>
                         <span className="h-px flex-1 bg-[#e3e8ef]" />
                       </div>
-                      <ul className="space-y-2 rounded-xl bg-[#f4f7fb] p-2 ring-1 ring-inset ring-[#e7edf5]">
+                      <ul className="divide-y divide-[#e7edf5] overflow-hidden rounded-xl bg-white ring-1 ring-inset ring-[#dfe6ef]">
                         {stop.maneuvers.map((m, mi) => {
                           const st = streetState(m.street);
                           const mid = `${si}-${mi}`;
@@ -295,7 +295,7 @@ export function EditScreen() {
                             : null;
                           const nearbyTargetRoad = targetRoad && targetRoad.distance <= 0.015 ? targetRoad : null;
                           return (
-                            <li key={mi} data-direction-row={mid} className="grid grid-cols-[9rem_1.75rem_1.9rem] items-center gap-1 rounded-lg border border-[#e1e7ef] bg-white p-1.5 shadow-[0_1px_2px_rgba(24,39,62,0.04)] sm:grid-cols-[9rem_minmax(0,1fr)_1.75rem_1.9rem]">
+                            <li key={mi} data-direction-row={mid} className="grid grid-cols-[6.5rem_minmax(0,1fr)_1.75rem_1.9rem] items-center gap-1 px-1.5 py-1 sm:grid-cols-[9rem_minmax(0,1fr)_1.75rem_1.9rem]">
                                 <div className="flex h-8 min-w-0 items-center rounded-md border border-[#cbd5e1] bg-[#f8fafc] pl-2 focus-within:ring-2 focus-within:ring-[#9bb4ff]">
                                   <ManeuverArrow kind={m.kind} />
                                   <select
@@ -304,37 +304,38 @@ export function EditScreen() {
                                     aria-label="Direction"
                                     onChange={(e) => updateManeuver(si, mi, { kind: e.target.value as ManeuverKind })}
                                   >
+                                    {/* Short words, so the street fits on the same line. */}
                                     {KINDS.map((k) => (
                                       <option key={k} value={k}>
-                                        {KIND_LABEL[k]}
+                                        {SHORT_KIND[k]}
                                       </option>
                                     ))}
                                   </select>
                                 </div>
                                 <WrapField
-                                  className="col-span-3 row-start-2 min-h-8 px-2 py-1 text-[13px] leading-tight sm:col-span-1 sm:row-auto"
+                                  className="min-h-8 px-2 py-1 text-[13px] leading-tight"
                                   value={m.street}
                                   label="Street"
                                   placeholder="Street name"
                                   onChange={(street) => updateManeuver(si, mi, { street })}
                                   onBlur={() => void recheckSoon()}
                                 />
-                                <div className="col-start-2 row-start-1 sm:col-auto sm:row-auto">
+                                <div>
                                   <StreetMark state={st.state} open={suggestFor === mid} onTap={() => void tapMark(mid, st.state === "found" ? [] : [m.street])} />
                                 </div>
                                 <button
                                   type="button"
-                                  className="col-start-3 row-start-1 h-8 w-8 touch-manipulation rounded-md border border-[#edd5d2] bg-white text-xs text-[#8f2c1c] sm:col-auto sm:row-auto"
+                                  className="h-8 w-8 touch-manipulation rounded-md border border-[#edd5d2] bg-white text-xs text-[#8f2c1c]"
                                   aria-label="Delete this direction"
                                   onClick={() => deleteManeuver(si, mi)}
                                 >
                                   ✕
                                 </button>
-                              {st.label && <p className="col-span-3 px-1 text-[0.7rem] leading-tight text-[#15803d] sm:col-span-4">On the map: {st.label}</p>}
+                              {st.label && <p className="col-span-4 px-1 text-[0.7rem] leading-tight text-[#15803d]">On the map: {st.label}</p>}
                               {st.state !== "found" && cornerInDirection(m.street) && (() => {
                                 const fix = fixJoinedCorner(sheet, si, mi);
                                 return (
-                                  <div className="col-span-3 rounded-lg border border-[#f0c36d] bg-[#fff6e5] p-2.5 text-xs leading-relaxed text-[#7f1d1d] sm:col-span-4" data-joined-corner>
+                                  <div className="col-span-4 rounded-lg border border-[#f0c36d] bg-[#fff6e5] p-2.5 text-xs leading-relaxed text-[#7f1d1d]" data-joined-corner>
                                     <p role="alert">
                                       A direction names one street, but this one names two. The reader probably joined a stop&apos;s location ({cornerInDirection(m.street)!.corner}) onto this direction.
                                     </p>
@@ -359,7 +360,7 @@ export function EditScreen() {
                                 );
                               })()}
                               {editWarnings.filter((w) => w.stopIndex === si && w.maneuverIndex === mi).map((w, wi) => (
-                                <div key={`route-warning-${wi}`} className="col-span-3 rounded-lg border border-[#f0c36d] bg-[#fff6e5] p-2.5 text-sm text-[#7f1d1d] sm:col-span-4">
+                                <div key={`route-warning-${wi}`} className="col-span-4 rounded-lg border border-[#f0c36d] bg-[#fff6e5] p-2.5 text-sm text-[#7f1d1d]">
                                   <p role="alert">Route warning: {w.message}</p>
                                   {editingRun && editingRun.coords.length > 1 && (
                                     <>

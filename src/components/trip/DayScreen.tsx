@@ -220,19 +220,26 @@ export function DayScreen() {
             })}
             {runs.length > 0 && (
               <div className="flex flex-col items-center gap-1">
-                <Button type="button" variant="outline" className="h-9 border-[#c9d6ea] bg-white px-3 text-xs font-semibold text-[#173b64]" onClick={() => void rebuildAllRuns()} disabled={exportingDay || rebuilding}>
-                  <RefreshCw className={`mr-1.5 h-3.5 w-3.5 ${rebuilding ? "animate-spin" : ""}`} aria-hidden />
-                  {rebuilding ? "Rebuilding…" : runs.length === 1 ? "Rebuild with latest app" : "Rebuild all with latest app"}
-                </Button>
-                <label className={`inline-flex h-9 cursor-pointer items-center rounded-md border border-[#c9d6ea] bg-white px-3 text-xs font-semibold text-[#173b64] ${exportingDay || rebuilding ? "pointer-events-none opacity-50" : ""}`}>
-                  Match stops to a recorded drive
-                  <input type="file" accept=".gpx,application/gpx+xml,application/xml,text/xml" multiple className="sr-only" disabled={exportingDay || rebuilding} onChange={(e) => { void matchRecordings(e.currentTarget.files); e.currentTarget.value = ""; }} />
-                </label>
-                <label className={`inline-flex h-9 cursor-pointer items-center rounded-md border border-[#c9d6ea] bg-white px-3 text-xs font-semibold text-[#173b64] ${exportingDay || rebuilding ? "pointer-events-none opacity-50" : ""}`}>
-                  Use a recorded drive as the route
-                  <input type="file" accept=".gpx,application/gpx+xml,application/xml,text/xml" multiple className="sr-only" disabled={exportingDay || rebuilding} onChange={(e) => { void matchRecordings(e.currentTarget.files, true); e.currentTarget.value = ""; }} />
-                </label>
-                <p className="text-center text-xs text-[#68758a]">Saved runs keep the route they were built with. Rebuild after an app update. A GPX recorded on the drive moves stops with warnings to where the bus stopped, or becomes the route itself: the road you drove, with the sheet&apos;s stops and turns on it. Recorded-drive runs send as their own day in GPX Nav.</p>
+                {/* Used now and then, so folded away: always out, they were a
+                    wall of buttons under the runs (UI audit, 15 Nov 2026). */}
+                <details className="w-full" data-run-tools>
+                  <summary className="mx-auto w-fit cursor-pointer select-none rounded-md px-2 py-1 text-xs font-semibold text-[#173b64]">Rebuild, or use a recorded drive</summary>
+                  <div className="mt-1 flex flex-col items-center gap-1">
+                    <Button type="button" variant="outline" className="h-9 border-[#c9d6ea] bg-white px-3 text-xs font-semibold text-[#173b64]" onClick={() => void rebuildAllRuns()} disabled={exportingDay || rebuilding}>
+                      <RefreshCw className={`mr-1.5 h-3.5 w-3.5 ${rebuilding ? "animate-spin" : ""}`} aria-hidden />
+                      {rebuilding ? "Rebuilding…" : runs.length === 1 ? "Rebuild with latest app" : "Rebuild all with latest app"}
+                    </Button>
+                    <label className={`inline-flex h-9 cursor-pointer items-center rounded-md border border-[#c9d6ea] bg-white px-3 text-xs font-semibold text-[#173b64] ${exportingDay || rebuilding ? "pointer-events-none opacity-50" : ""}`}>
+                      Match stops to a recorded drive
+                      <input type="file" aria-label="Match stops to a recorded drive" accept=".gpx,application/gpx+xml,application/xml,text/xml" multiple className="sr-only" disabled={exportingDay || rebuilding} onChange={(e) => { void matchRecordings(e.currentTarget.files); e.currentTarget.value = ""; }} />
+                    </label>
+                    <label className={`inline-flex h-9 cursor-pointer items-center rounded-md border border-[#c9d6ea] bg-white px-3 text-xs font-semibold text-[#173b64] ${exportingDay || rebuilding ? "pointer-events-none opacity-50" : ""}`}>
+                      Use a recorded drive as the route
+                      <input type="file" aria-label="Use a recorded drive as the route" accept=".gpx,application/gpx+xml,application/xml,text/xml" multiple className="sr-only" disabled={exportingDay || rebuilding} onChange={(e) => { void matchRecordings(e.currentTarget.files, true); e.currentTarget.value = ""; }} />
+                    </label>
+                    <p className="text-center text-xs text-[#68758a]">Saved runs keep the route they were built with. Rebuild after an app update. A GPX recorded on the drive moves stops with warnings to where the bus stopped, or becomes the route itself: the road you drove, with the sheet&apos;s stops and turns on it. Recorded-drive runs send as their own day in GPX Nav.</p>
+                  </div>
+                </details>
                 {notice && <p className="text-center text-sm font-medium text-[#216338]">{notice}</p>}
               </div>
             )}

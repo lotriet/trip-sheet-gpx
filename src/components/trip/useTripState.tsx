@@ -1053,6 +1053,7 @@ export function useTripState() {
   function renderWarnings() {
     if (!route) return null;
     const issueCount = route.warnings.filter((warning) => warning.level === "warn").length;
+    const notes = route.warnings.filter((warning) => warning.level !== "warn");
     let issueIndex = 0;
     return (
       <section aria-label="Route issues" className="space-y-2">
@@ -1075,49 +1076,64 @@ export function useTripState() {
             </div>
           </div>
         )}
-        {route.warnings.map((w, i) => {
-          const warningIndex = w.level === "warn" ? issueIndex++ : undefined;
-          const waypointWarning = w.message.startsWith("Couldn't find a drivable connection to the point you added");
-          const mapLocationWarning = !!w.location && !waypointWarning;
-          const gapWarning = w.message.startsWith("The map has an incomplete connection");
-          const stop = route.stops.find((s) => s.index === w.stopIndex);
-          const destinationWarning = w.message.startsWith("Couldn't reach the last stop");
-          const maneuver = destinationWarning ? undefined : sheet.stops[w.stopIndex]?.maneuvers[w.maneuverIndex];
-          return (
-            <div key={`${i}-${w.stopIndex}-${w.maneuverIndex}`} data-route-warning={warningIndex} className={`rounded-lg p-3 text-sm ${w.level === "warn" ? "bg-[#ffedd5]" : "bg-white ring-1 ring-[#d9d2c3]"}`}>
-              {w.level === "warn" && stop && !waypointWarning && !mapLocationWarning && (
-                <div className="mb-1 rounded-md bg-white/70 px-2 py-1.5 text-xs text-[#394861]">
-                  <p className="font-semibold">Stop {w.stopIndex + 1}{sheet.stops[w.stopIndex]?.time ? ` · ${sheet.stops[w.stopIndex].time}` : ""}</p>
-                  {maneuver && <p className="mt-0.5">{KIND_LABEL[maneuver.kind]} {maneuver.street || "[street missing]"}</p>}
-                </div>
-              )}
-              <p>{w.message}</p>
-              {w.level === "warn" && (
-                <div className="mt-2 flex flex-wrap gap-2">
-                  {waypointWarning ? (
-                    <Button type="button" variant="outline" className="h-10 bg-white" onClick={() => {
-                      setView("edit");
-                      window.setTimeout(() => document.querySelector<HTMLElement>("[data-waypoints]")?.scrollIntoView({ behavior: "smooth", block: "center" }), 50);
-                    }}>Review map point</Button>
-                  ) : mapLocationWarning ? (
-                    <Button type="button" variant="outline" className="h-10 bg-white" onClick={() => {
-                      setMapFocus({ lat: w.location![1], lon: w.location![0], key: ++mapFocusKey.current });
-                      document.querySelector("[data-route-map]")?.scrollIntoView({ behavior: "smooth", block: "center" });
-                    }}>{gapWarning ? "Show gap on map" : "Show road on map"}</Button>
-                  ) : (
-                    <>
-                      {stop && <Button type="button" variant="outline" className="h-10 bg-white" onClick={() => showWarningOnMap(w.stopIndex)}>Show stop on map</Button>}
-                      {stop && <Button type="button" variant="outline" className="h-10 bg-white" onClick={() => focusWarning(w.stopIndex, w.message, maneuver?.street)}>Guide on map</Button>}
-                      {maneuver && <Button type="button" variant="outline" className="h-10 bg-white" onClick={() => editWarning(w.stopIndex, w.maneuverIndex)}>Edit this turn</Button>}
-                    </>
-                  )}
-                </div>
-              )}
+        {route.warnings.map((w, i) => w.level === "warn" ? renderWarning(w, i) : null)}
+        {notes.length > 0 && (
+          // Notes the driver needn't act on, folded away: listed with the
+          // warnings they buried them (UI audit, 15 Nov 2026).
+          <details className="rounded-lg bg-white text-sm ring-1 ring-[#d9d2c3]" data-route-notes>
+            <summary className="cursor-pointer select-none px-3 py-2 font-semibold text-[#3d4b63]">
+              {notes.length} {notes.length === 1 ? "note" : "notes"} about the map
+            </summary>
+            <div className="space-y-2 px-3 pb-3">
+              {route.warnings.map((w, i) => w.level === "warn" ? null : renderWarning(w, i))}
             </div>
-          );
-        })}
+          </details>
+        )}
       </section>
     );
+
+    function renderWarning(w: Warning, i: number) {
+      if (!route) return null;
+      const warningIndex = w.level === "warn" ? issueIndex++ : undefined;
+      const waypointWarning = w.message.startsWith("Couldn't find a drivable connection to the point you added");
+      const mapLocationWarning = !!w.location && !waypointWarning;
+      const gapWarning = w.message.startsWith("The map has an incomplete connection");
+      const stop = route.stops.find((s) => s.index === w.stopIndex);
+      const destinationWarning = w.message.startsWith("Couldn't reach the last stop");
+      const maneuver = destinationWarning ? undefined : sheet.stops[w.stopIndex]?.maneuvers[w.maneuverIndex];
+      return (
+        <div key={`${i}-${w.stopIndex}-${w.maneuverIndex}`} data-route-warning={warningIndex} className={`rounded-lg p-3 text-sm ${w.level === "warn" ? "bg-[#ffedd5]" : "bg-white ring-1 ring-[#d9d2c3]"}`}>
+          {w.level === "warn" && stop && !waypointWarning && !mapLocationWarning && (
+            <div className="mb-1 rounded-md bg-white/70 px-2 py-1.5 text-xs text-[#394861]">
+              <p className="font-semibold">Stop {w.stopIndex + 1}{sheet.stops[w.stopIndex]?.time ? ` · ${sheet.stops[w.stopIndex].time}` : ""}</p>
+              {maneuver && <p className="mt-0.5">{KIND_LABEL[maneuver.kind]} {maneuver.street || "[street missing]"}</p>}
+            </div>
+          )}
+          <p>{w.message}</p>
+          {w.level === "warn" && (
+            <div className="mt-2 flex flex-wrap gap-2">
+              {waypointWarning ? (
+                <Button type="button" variant="outline" className="h-10 bg-white" onClick={() => {
+                  setView("edit");
+                  window.setTimeout(() => document.querySelector<HTMLElement>("[data-waypoints]")?.scrollIntoView({ behavior: "smooth", block: "center" }), 50);
+                }}>Review map point</Button>
+              ) : mapLocationWarning ? (
+                <Button type="button" variant="outline" className="h-10 bg-white" onClick={() => {
+                  setMapFocus({ lat: w.location![1], lon: w.location![0], key: ++mapFocusKey.current });
+                  document.querySelector("[data-route-map]")?.scrollIntoView({ behavior: "smooth", block: "center" });
+                }}>{gapWarning ? "Show gap on map" : "Show road on map"}</Button>
+              ) : (
+                <>
+                  {stop && <Button type="button" variant="outline" className="h-10 bg-white" onClick={() => showWarningOnMap(w.stopIndex)}>Show stop on map</Button>}
+                  {stop && <Button type="button" variant="outline" className="h-10 bg-white" onClick={() => focusWarning(w.stopIndex, w.message, maneuver?.street)}>Guide on map</Button>}
+                  {maneuver && <Button type="button" variant="outline" className="h-10 bg-white" onClick={() => editWarning(w.stopIndex, w.maneuverIndex)}>Edit this turn</Button>}
+                </>
+              )}
+            </div>
+          )}
+        </div>
+      );
+    }
   }
 
   function onMapClick(lat: number, lon: number) {
